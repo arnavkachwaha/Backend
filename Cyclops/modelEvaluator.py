@@ -51,6 +51,14 @@ class ModelEvaluator:
 
     # Overlay the mask and circle on the original image
     def overlay_mask_on_image(self, image: np.ndarray) -> np.ndarray:
+        # Check brightness of the image
+        brightness = self.calculate_brightness(image)
+
+        # If brightness is less than 0, return with radius 0
+        if brightness < 80:
+            print(f"Frame discarded due to low brightness: {brightness}")
+            return image, 0 
+        
         # Preprocess the image
         input_data = self.preprocess_image(image)
         
@@ -64,19 +72,23 @@ class ModelEvaluator:
         # Fit the circle to the mask
         center, radius = self.fit_circle_to_mask(mask)
 
-        # Overlay the circle and mask on the original image
-        mask_colored = np.zeros_like(image)
-        mask_colored[mask == 1] = [0, 255, 0]  # Green for mask
-
-        # Blend the original image with the mask
-        blended_image = cv2.addWeighted(image, 0.7, mask_colored, 0.3, 0)
-
         # Draw the circle onto the blended image
         if center != (0, 0):
-            cv2.circle(blended_image, center, radius, (255, 0, 0), 2)  # Blue circle
+            cv2.circle(image, center, radius, (0, 255, 0), 2)  # Green circle
+            cv2.putText(image, str(radius), 
+                        org = (center[0] + radius + 1, center[1] + radius + 1), 
+                        fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                        fontScale = 1, 
+                        color = (255, 0, 0), 
+                        thickness = 2)
         
-        return blended_image
+        return image, radius
 
     # Function to return the final predicted image with mask and circle
     def get_predicted_output(self, image: np.ndarray) -> np.ndarray:
         return self.overlay_mask_on_image(image)
+    
+    # Add a function to calculate the brightness of the image
+    def calculate_brightness(self, image: np.ndarray) -> float:
+        grayscale_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        return np.mean(grayscale_image)  # Return the average pixel value

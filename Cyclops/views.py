@@ -2,7 +2,7 @@ import os
 from django.conf import settings
 from django.shortcuts import render
 from Cyclops.forms import VideoForm
-from Cyclops.utils import captureFrames
+from Cyclops.utils import processVideoForPLR , processVideoForVOMS
 from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 
@@ -10,29 +10,37 @@ from django.views.decorators.csrf import csrf_exempt
 @csrf_exempt
 def upload_form(request):
     if request.method == 'POST':
+        videoType = request.POST.get('videoType')
         form = VideoForm(request.POST, request.FILES)
         if form.is_valid():
-            video_file = request.FILES['videofile']
-            result = captureFrames(video_file)
+            videoFile = request.FILES['videofile']
+            if videoType == "VOMS":
+                result = processVideoForVOMS(videoFile)
+            else:
+                result = processVideoForPLR(videoFile)
             if 'error' in result:
                 return JsonResponse({'message': result['error']}, status=400)
 
-            # Serve the processed video as a response
             video_path = result.get('video')
-            if video_path and os.path.exists(video_path):
-                with open(video_path, 'rb') as f:
-                    response = HttpResponse(f.read(), content_type='video/mp4')
-                    response['Content-Disposition'] = f'inline; filename="output_video.mp4"'
-                    return response
+            graph_path = result.get('graph')
+
+            if video_path and os.path.exists(video_path) and graph_path and os.path.exists(graph_path):
+                video_download_url = request.build_absolute_uri(f'/media/{videoType}/{os.path.basename(video_path)}')
+                graph_download_url = request.build_absolute_uri(f'/media/{videoType}/{os.path.basename(graph_path)}')
+
+                return JsonResponse({
+                    'video_download_url': video_download_url,
+                    'graph_download_url': graph_download_url
+                }, status=200)
             else:
                 return JsonResponse({"message": "Video processing failed"}, status=500)
         else:
             return JsonResponse({'message': 'Form is invalid', 'errors': form.errors}, status=400)
+
     elif request.method == 'GET':
         return render(request, 'upload.html', {'form': VideoForm()})
     
     return JsonResponse({'message': 'Invalid request method'}, status=405)
-
 
 
 def fetch_processed_video(request):
