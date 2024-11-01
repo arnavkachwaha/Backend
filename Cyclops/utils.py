@@ -21,7 +21,7 @@ matplotlib.use('Agg')
 
 def processVideoForPLR(video_file):
     FRAMES_DIR = os.path.join(settings.MEDIA_ROOT, "frames", "PLR")
-    fps = 60
+    fps = 30
 
     model_evaluator = ModelEvaluator()
     
@@ -48,6 +48,7 @@ def processVideoForPLR(video_file):
         frame_radius = []
 
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        all_frames_count = 1
 
         # Capture and process each frame
         print('Processing frames')
@@ -56,7 +57,8 @@ def processVideoForPLR(video_file):
             if ret:
                 frame_filename = f"frame_{frame_save_count}.png"
                 full_frame_path = os.path.join(FRAMES_DIR, frame_filename)
-                print(f"Processing frame {frame_save_count} of {total_frames}")
+                print(f"Processing frame {all_frames_count} of {total_frames}")
+                all_frames_count += 1
                 predicted_frame, radius = model_evaluator.get_predicted_output(frame)
                 if radius != 0:
                     frame_radius.append(radius)
