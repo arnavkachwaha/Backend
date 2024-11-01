@@ -21,7 +21,7 @@ matplotlib.use('Agg')
 
 def processVideoForPLR(video_file):
     FRAMES_DIR = os.path.join(settings.MEDIA_ROOT, "frames", "PLR")
-    fps = 30
+    fps = 60
 
     model_evaluator = ModelEvaluator()
     
