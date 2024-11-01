@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
+# use absolute path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Quick-start development settings - unsuitable for production
@@ -61,13 +62,13 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 10485760  # 10MB for uploaded files
 
 
 ROOT_URLCONF = 'InsightServer.urls'
-
+TEMPLATES_DIR = os.path.join(BASE_DIR, 'Templates')
+print("Templates: ", TEMPLATES_DIR) 
 
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
-        'APP_DIRS': True,
+        'DIRS': [TEMPLATES_DIR],
         'OPTIONS': {
             'context_processors': [
                 'django.template.context_processors.debug',
