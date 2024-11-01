@@ -68,7 +68,7 @@ print("Templates: ", TEMPLATES_DIR)
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [TEMPLATES_DIR],
+        'DIRS': [TEMPLATES_DIR], # IDK or really care how to make APP_DIRS work, so using root level Templates for now. 
         'OPTIONS': {
             'context_processors': [
                 'django.template.context_processors.debug',

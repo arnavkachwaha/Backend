@@ -10,6 +10,7 @@ import torchvision.transforms as transforms
 class ModelEvaluator:
     # Load the model and set it to evaluation mode
     def __init__(self):
+        print("GPU Available: ", torch.cuda.is_available())
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.normal_transform = transforms.Compose([
             transforms.ToTensor(),
