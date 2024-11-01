@@ -62,10 +62,15 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 10485760  # 10MB for uploaded files
 
 ROOT_URLCONF = 'InsightServer.urls'
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+TEMPLATE_PATH = os.path.join(BASE_DIR, 'Templates')
+
+print("TEMPLATE_PATH: ", TEMPLATE_PATH)
+
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [],  # Add the Templates directory to the DIRS list
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -78,6 +83,8 @@ TEMPLATES = [
         },
     },
 ]
+
+
 
 WSGI_APPLICATION = 'InsightServer.wsgi.application'
 
