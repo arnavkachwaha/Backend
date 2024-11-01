@@ -10,12 +10,13 @@ import torchvision.transforms as transforms
 class ModelEvaluator:
     # Load the model and set it to evaluation mode
     def __init__(self):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.normal_transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.6019, 0.4767, 0.4340], std=[0.229, 0.224, 0.225]) # will need to update these values based on the dataset used for training
         ])
-        self.model = segformerModelDef.CyclopsSegformerModule()
-        state_dict = torch.load("/Users/arnavkachwaha/Desktop/Insight-Server/segformer_model.pth")
+        self.model = segformerModelDef.CyclopsSegformerModule().to(self.device)
+        state_dict = torch.load("segformer_model.pth", map_location=self.device)
         self.model.load_state_dict(state_dict, strict=False)
         self.model.eval()
 
@@ -26,7 +27,7 @@ class ModelEvaluator:
         resized_image = pil_image.resize((input_shape[3], input_shape[2]))
         tensor_image = self.normal_transform(resized_image).unsqueeze(0)  # Add batch dimension
 
-        return tensor_image
+        return tensor_image.to(self.device)
 
     # Postprocess the mask to get the final segmentation mask
     def postprocess_mask(self, mask: torch.Tensor, output_shape=(480, 640)) -> np.ndarray:
@@ -55,7 +56,7 @@ class ModelEvaluator:
         brightness = self.calculate_brightness(image)
 
         # If brightness is less than 70, return with radius 0
-        if brightness < 70:
+        if (brightness < 70):
             print(f"Frame discarded due to low brightness: {brightness}")
             return image, 0 
         

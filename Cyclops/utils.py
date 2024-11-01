@@ -28,6 +28,7 @@ def processVideoForPLR(video_file):
     if not os.path.exists(FRAMES_DIR):
         os.makedirs(FRAMES_DIR)
 
+    print('Writing video to temp file')
     with NamedTemporaryFile(delete=False, suffix=".mov") as temp_video_file:
         temp_video_file.write(video_file.read())
         temp_video_file.flush()
@@ -36,6 +37,7 @@ def processVideoForPLR(video_file):
     output_cropped_video_path = "./media/output_cropped_video.mp4"
 
     try:
+        print('Cropping video')
         cap = cv2.VideoCapture(cropVideo(temp_video_file_path))
 
         if not cap.isOpened():
@@ -45,24 +47,36 @@ def processVideoForPLR(video_file):
         frame_filenames = []
         frame_radius = []
 
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
         # Capture and process each frame
+        print('Processing frames')
         while cap.isOpened():
             ret, frame = cap.read()
             if ret:
                 frame_filename = f"frame_{frame_save_count}.png"
                 full_frame_path = os.path.join(FRAMES_DIR, frame_filename)
+                print(f"Processing frame {frame_save_count} of {total_frames}")
                 predicted_frame, radius = model_evaluator.get_predicted_output(frame)
                 if radius != 0:
                     frame_radius.append(radius)
-                    cv2.imwrite(full_frame_path, predicted_frame)
-                    frame_filenames.append(full_frame_path)
-                    frame_save_count += 1
+                    # cv2.imwrite(full_frame_path, predicted_frame)
+                    # save to temp folder
+                    try:
+                        with NamedTemporaryFile(delete=False, suffix=".png") as temp_frame:
+                            cv2.imwrite(temp_frame.name, predicted_frame)
+                            frame_filenames.append(temp_frame.name)
+                            frame_save_count += 1
+                    except Exception as e:
+                        print(f"Error saving frame: {e}")
             else:
                 break
 
         cap.release()
         output_video_path = os.path.join(settings.MEDIA_ROOT, "PLR", "output_video.mp4")
+        print('Plotting graph')
         output_graph_path = plot_radius_over_time(frame_radius, getPlrMetrics(frame_radius), fps, video_file)
+        print('Creating video')
         create_video_from_frames(frame_filenames, output_video_path)
         return {"message": "Frames captured successfully", "video": output_video_path, "graph": output_graph_path}
     

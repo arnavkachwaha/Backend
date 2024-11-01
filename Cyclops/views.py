@@ -15,8 +15,10 @@ def upload_form(request):
         if form.is_valid():
             videoFile = request.FILES['videofile']
             if videoType == "VOMS":
+                print("Processing video for VOMS")
                 result = processVideoForVOMS(videoFile)
             else:
+                print("Processing video for PLR")
                 result = processVideoForPLR(videoFile)
             if 'error' in result:
                 return JsonResponse({'message': result['error']}, status=400)

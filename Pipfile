@@ -4,9 +4,17 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
+django-storages = "*"
+django-cors-headers = "*"
+mediapipe = "*"
+matplotlib = "*"
+opencv-python = "*"
+torch = "*"
+torchvision = "*"
+moviepy = "*"
 django = "*"
 
 [dev-packages]
 
 [requires]
-python_version = "3.11"
+python_version = ">3.11"
