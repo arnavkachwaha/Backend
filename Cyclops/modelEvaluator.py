@@ -21,11 +21,15 @@ class ModelEvaluator:
         self.model.load_state_dict(state_dict, strict=False)
         self.model.eval()
 
-    # Preprocess the image to get it ready for the model
+    # OpenCV
     def preprocess_image(self, image: np.ndarray, input_shape=(1, 3, 480, 640)) -> torch.Tensor:
-        # Convert numpy array (image) to PIL, resize, and apply transformations
-        pil_image = Image.fromarray(image)
-        resized_image = pil_image.resize((input_shape[3], input_shape[2]))
+        # Convert the image from BGR (OpenCV format) to RGB
+        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        # Resize the image
+        resized_image = cv2.resize(rgb_image, (input_shape[3], input_shape[2]))
+
+        # Convert to tensor and normalize
         tensor_image = self.normal_transform(resized_image).unsqueeze(0)  # Add batch dimension
 
         return tensor_image.to(self.device)
@@ -56,10 +60,11 @@ class ModelEvaluator:
         # Check brightness of the image
         brightness = self.calculate_brightness(image)
 
+        # skip step for now, need to revisit this after testing
         # If brightness is less than 70, return with radius 0
-        if (brightness < 70):
-            print(f"Frame discarded due to low brightness: {brightness}")
-            return image, 0 
+        # if (brightness < 25):
+        #     print(f"Frame discarded due to low brightness: {brightness}")
+        #     return image, 0 
         
         # Preprocess the image
         input_data = self.preprocess_image(image)
@@ -77,11 +82,11 @@ class ModelEvaluator:
         # Draw the circle onto the blended image
         if center != (0, 0):
             cv2.circle(image, center, radius, (0, 255, 0), 2)  # Green circle
-            cv2.putText(image, str(radius), 
+            cv2.putText(image, str(radius*2), 
                         org = (center[0] + radius + 1, center[1] + radius + 1), 
                         fontFace=cv2.FONT_HERSHEY_SIMPLEX,
                         fontScale = 1, 
-                        color = (255, 0, 0), 
+                        color = (255, 255, 0), 
                         thickness = 2)
         
         return image, radius

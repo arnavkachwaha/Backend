@@ -62,9 +62,13 @@ def processVideoForPLR(video_file):
                 predicted_frame, radius = model_evaluator.get_predicted_output(frame)
                 if radius != 0:
                     frame_radius.append(radius)
+                    # hard save for debug 
                     # cv2.imwrite(full_frame_path, predicted_frame)
-                    # save to temp folder
-                    try:
+                    # frame_filenames.append(full_frame_path)
+                    # frame_save_count += 1
+                    
+                    # save to temp folder for prod 
+                    try: 
                         with NamedTemporaryFile(delete=False, suffix=".png") as temp_frame:
                             cv2.imwrite(temp_frame.name, predicted_frame)
                             frame_filenames.append(temp_frame.name)
