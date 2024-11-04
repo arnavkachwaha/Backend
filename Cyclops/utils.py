@@ -13,6 +13,7 @@ from scipy.signal import butter, filtfilt
 from .modelEvaluator import ModelEvaluator
 from scipy.ndimage import gaussian_filter1d 
 from moviepy.editor import ImageSequenceClip
+import datetime
 
 mp_face_mesh = mp.solutions.face_mesh
 LEFT_IRIS = [474,475, 476, 477]
@@ -84,11 +85,39 @@ def processVideoForPLR(video_file):
         output_graph_path = plot_radius_over_time(frame_radius, getPlrMetrics(frame_radius), fps, video_file)
         print('Creating video')
         create_video_from_frames(frame_filenames, output_video_path)
-        return {"message": "Frames captured successfully", "video": output_video_path, "graph": output_graph_path}
+        vid_file, graph_file = save_outputs(output_video_path, output_graph_path, "PLR")
+
+        return {"message": "Frames captured successfully", "video": vid_file, "graph": graph_file}
     
     finally:
         os.remove(output_cropped_video_path)
         os.remove(temp_video_file_path)
+
+def save_outputs(temp_video_path, temp_graph_path, output_type):
+    try:
+        with open(temp_video_path, 'rb') as video_file, open(temp_graph_path, 'rb') as graph_file:
+            video_data = video_file.read()
+            graph_data = graph_file.read()
+
+            # generate file_name based on date and timestamp
+            timestamp  = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+
+            vid_path = os.path.join(settings.MEDIA_ROOT, output_type, f"video_{timestamp}.mp4")
+            graph_path = os.path.join(settings.MEDIA_ROOT, output_type, f"graph_{timestamp}.png")
+
+            with open(vid_path, 'wb') as output_video_file:
+                output_video_file.write(video_data)
+
+            with open(graph_path, 'wb') as output_graph_file:
+                output_graph_file.write(graph_data)
+        
+        return vid_path, graph_path
+
+    except Exception as e:
+        print(f"Error saving outputs: {e}")
+        return None, None
+        
+
 
 def cropVideo(input_path, zoom_factor=1.5, top_offset=200, output_path="./media/output_cropped_video.mp4"):
     # get the video properties
@@ -264,7 +293,10 @@ def processVideoForVOMS(video_file):
         plot_eye_movement_graph(left_eye_positions, right_eye_positions, frame_times, output_graph_path)
         create_video_from_frames(frame_filenames, output_video_path)
 
-        return {"message": "Frames captured successfully", "video": output_video_path,  "graph": output_graph_path}
+        # save the outputs
+        video_file, graph_file = save_outputs(output_video_path, output_graph_path, "VOMS")
+
+        return {"message": "Frames captured successfully", "video": video_file,  "graph": graph_file}
 
     finally:
         os.remove(temp_video_file_path)
