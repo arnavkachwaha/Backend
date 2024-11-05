@@ -9,20 +9,16 @@ from scipy.stats import zscore
 import matplotlib.pyplot as plt
 from django.conf import settings
 from tempfile import NamedTemporaryFile
-from scipy.signal import butter, filtfilt
 from .modelEvaluator import ModelEvaluator
-from scipy.ndimage import gaussian_filter1d 
 from moviepy.editor import ImageSequenceClip
 import datetime
+from scipy.signal import butter, filtfilt, detrend
 
 mp_face_mesh = mp.solutions.face_mesh
-LEFT_IRIS = [474,475, 476, 477]
-RIGHT_IRIS = [469, 470, 471, 472]
 matplotlib.use('Agg')
 
 def processVideoForPLR(video_file):
     FRAMES_DIR = os.path.join(settings.MEDIA_ROOT, "frames", "PLR")
-    fps = 30
 
     model_evaluator = ModelEvaluator()
     
@@ -34,16 +30,14 @@ def processVideoForPLR(video_file):
         temp_video_file.write(video_file.read())
         temp_video_file.flush()
         temp_video_file_path = temp_video_file.name
-    
-    output_cropped_video_path = "./media/output_cropped_video.mp4"
 
     try:
-        print('Cropping video')
-        cap = cv2.VideoCapture(cropVideo(temp_video_file_path))
+        cap = cv2.VideoCapture(temp_video_file_path)
 
         if not cap.isOpened():
             return {"error": "Error: Cannot open video stream"}
-
+        
+        fps = cap.get(cv2.CAP_PROP_FPS)
         frame_save_count = 1
         frame_filenames = []
         frame_radius = []
@@ -60,7 +54,7 @@ def processVideoForPLR(video_file):
                 full_frame_path = os.path.join(FRAMES_DIR, frame_filename)
                 print(f"Processing frame {all_frames_count} of {total_frames}")
                 all_frames_count += 1
-                predicted_frame, radius = model_evaluator.get_predicted_output(frame)
+                predicted_frame, radius = model_evaluator.get_predicted_output(cropFrame(frame))
                 if radius != 0:
                     frame_radius.append(radius)
                     # hard save for debug 
@@ -84,13 +78,13 @@ def processVideoForPLR(video_file):
         print('Plotting graph')
         output_graph_path = plot_radius_over_time(frame_radius, getPlrMetrics(frame_radius), fps, video_file)
         print('Creating video')
-        create_video_from_frames(frame_filenames, output_video_path)
+
+        create_video_from_frames(frame_filenames, output_video_path, fps)
         vid_file, graph_file = save_outputs(output_video_path, output_graph_path, "PLR")
 
-        return {"message": "Frames captured successfully", "video": vid_file, "graph": graph_file}
+        return {"message": "Frames captured successfully", "video": output_video_path, "graph": output_graph_path}
     
     finally:
-        os.remove(output_cropped_video_path)
         os.remove(temp_video_file_path)
 
 def save_outputs(temp_video_path, temp_graph_path, output_type):
@@ -116,40 +110,26 @@ def save_outputs(temp_video_path, temp_graph_path, output_type):
     except Exception as e:
         print(f"Error saving outputs: {e}")
         return None, None
-        
 
-
-def cropVideo(input_path, zoom_factor=1.5, top_offset=200, output_path="./media/output_cropped_video.mp4"):
-    # get the video properties
-    cap = cv2.VideoCapture(input_path)
-    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    cap.release()
-
-    # Calculate crop parameters
+# Calculate crop parameters
+def cropFrame(frame):
+    print('Cropping frame')
+    zoom_factor = 1.5 
+    top_offset = 200 
+    h, w = frame.shape[:2]
     target_h = int(w * 3 / 4)
     zoomed_h = int(target_h / zoom_factor)
     zoomed_w = int(w / zoom_factor)
     start_y = top_offset
-
-    crop_params = f"crop={zoomed_w}:{zoomed_h}:{(w - zoomed_w) // 2}:{start_y}"
-
-    ffmpeg_command = [
-        "ffmpeg",
-        "-i", input_path,          
-        "-vf", crop_params, 
-        '-an',  # Remove the audio stream          
-        "-s", "640x480",            
-        "-y",             
-        '-preset', 'fast',  # Faster encoding
-        '-crf', '23',  # Constant rate factor for quality (23 is a good balance)             
-        output_path          
-    ]
-
-    subprocess.run(ffmpeg_command, check=True)
-    return output_path
+    end_y = start_y + zoomed_h
+    if end_y > h:
+        end_y = h
+    cropped_frame = frame[start_y:end_y, (w - zoomed_w) // 2 : (w + zoomed_w) // 2]
+    resized_frame = cv2.resize(np.array(cropped_frame), (640, 480))
+    return (resized_frame)
 
 def getPlrMetrics(frame_radius):
+    print('Calculating PLR metrics')
     flashPoint = 30
     maxPD = max(frame_radius[0:flashPoint])
     minPD = min(frame_radius)
@@ -217,8 +197,8 @@ def create_video_from_frames(frame_filenames, output_video_path, fps=30):
     clip.write_videofile(output_video_path, codec='libx264')
 
 def processVideoForVOMS(video_file):
+    print('Processing video for VOMS') 
     FRAMES_DIR = os.path.join(settings.MEDIA_ROOT, "frames", "VOMS")
-
     if not os.path.exists(FRAMES_DIR):
         os.makedirs(FRAMES_DIR)
 
@@ -227,92 +207,130 @@ def processVideoForVOMS(video_file):
         temp_video_file.flush()
         temp_video_file_path = temp_video_file.name
 
-    frame_filenames = []
-    left_eye_positions = [] 
-    right_eye_positions = []
-    frame_times = []
-    frame_count = 0
-
     try:
-        with mp_face_mesh.FaceMesh(
+        with mp.solutions.face_mesh.FaceMesh(
             max_num_faces=1,
             refine_landmarks=True,
             min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
+            min_tracking_confidence=0.5,
         ) as face_mesh:
+
+            extreme_points = {
+                "Left Iris Left Extreme": 474,
+                "Left Iris Right Extreme": 476,
+                "Right Iris Left Extreme": 469,
+                "Right Iris Right Extreme": 471
+            }
 
             cap = cv2.VideoCapture(temp_video_file_path)
 
             if not cap.isOpened():
                 return {"error": "Error: Cannot open video stream"}
+            
+            left_iris_centers = []
+            right_iris_centers = []
 
+            frame_filenames = []
             frame_save_count = 1
-            fps = cap.get(cv2.CAP_PROP_FPS)  # Get frame rate for time calculation
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            time_per_frame = 1000 / fps  # Time in milliseconds
 
-            # Capture and process each frame
             while cap.isOpened():
                 ret, frame = cap.read()
-                if ret:
-                    frame = cv2.flip(frame, 1)
-                    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    results = face_mesh.process(rgb_frame)
+                if not ret:
+                    break
 
-                    if results.multi_face_landmarks:
-                        mesh_points = np.array([[int(p.x * frame.shape[1]), int(p.y * frame.shape[0])] 
-                                                 for p in results.multi_face_landmarks[0].landmark])
+                print(f"Processing frame {frame_save_count}")
 
-                        (l_cx, l_cy), l_radius = cv2.minEnclosingCircle(mesh_points[LEFT_IRIS])
-                        (r_cx, r_cy), r_radius = cv2.minEnclosingCircle(mesh_points[RIGHT_IRIS])
+                results = face_mesh.process(frame)
 
-                        center_left = np.array([l_cx, l_cy], dtype=np.int32)
-                        center_right = np.array([r_cx, r_cy], dtype=np.int32)
+                if results.multi_face_landmarks:
+                    for face_landmarks in results.multi_face_landmarks:
+                        # Calculate left iris center and radius
+                        left_iris_left = face_landmarks.landmark[extreme_points["Left Iris Left Extreme"]]
+                        left_iris_right = face_landmarks.landmark[extreme_points["Left Iris Right Extreme"]]
+                        l_cx = (left_iris_left.x + left_iris_right.x) / 2
+                        l_cy = (left_iris_left.y + left_iris_right.y) / 2
+                        l_radius = np.sqrt((left_iris_left.x - left_iris_right.x) ** 2 + 
+                                           (left_iris_left.y - left_iris_right.y) ** 2) / 2
 
-                        left_eye_positions.append(center_left[0]) 
-                        right_eye_positions.append(center_right[0])
+                        # Convert to pixel space
+                        l_cx, l_cy = int(l_cx * frame.shape[1]), int(l_cy * frame.shape[0])
+                        l_radius = int(l_radius * frame.shape[1])
 
-                        frame_times.append(frame_count / fps)
-                        frame_count += 1
+                        # Calculate right iris center and radius
+                        right_iris_left = face_landmarks.landmark[extreme_points["Right Iris Left Extreme"]]
+                        right_iris_right = face_landmarks.landmark[extreme_points["Right Iris Right Extreme"]]
+                        r_cx = (right_iris_left.x + right_iris_right.x) / 2
+                        r_cy = (right_iris_left.y + right_iris_right.y) / 2
+                        r_radius = np.sqrt((right_iris_left.x - right_iris_right.x) ** 2 + 
+                                           (right_iris_left.y - right_iris_right.y) ** 2) / 2
 
-                        cv2.circle(frame, center_left, int(l_radius), (0, 255, 0), 2)
-                        cv2.circle(frame, center_right, int(r_radius), (0, 255, 0), 2)
+                        # Convert to pixel space
+                        r_cx, r_cy = int(r_cx * frame.shape[1]), int(r_cy * frame.shape[0])
+                        r_radius = int(r_radius * frame.shape[1])
 
+                        # Draw circles around the irises
+                        cv2.circle(frame, (l_cx, l_cy), l_radius, (0, 255, 0), 2)
+                        cv2.circle(frame, (r_cx, r_cy), r_radius, (0, 255, 0), 2)
+
+                        # Store iris center positions for plotting
+                        left_iris_centers.append((l_cx, l_cy))
+                        right_iris_centers.append((r_cx, r_cy))
+
+                    # Save the processed frame
                     frame_filename = f"frame_{frame_save_count}.png"
-                    full_frame_path = os.path.join(FRAMES_DIR,  frame_filename)
+                    full_frame_path = os.path.join(FRAMES_DIR, frame_filename)
                     cv2.imwrite(full_frame_path, frame)
                     frame_filenames.append(full_frame_path)
                     frame_save_count += 1
 
-                else:
-                    break
+            cap.release()
 
-        cap.release()
+            # Calculate times for each frame for plotting
+            times = np.arange(0, len(left_iris_centers)) * time_per_frame
+
+            output_video_path = os.path.join(settings.MEDIA_ROOT, "VOMS", "output_video.mp4")
+            output_graph_path = os.path.join(settings.MEDIA_ROOT, "VOMS", "output_graph.png")
+
         
-        output_video_path = os.path.join(settings.MEDIA_ROOT, "VOMS", "output_video.mp4")
-        output_graph_path = os.path.join(settings.MEDIA_ROOT, "VOMS", "output_graph.png")
+            plot_iris_center_graph(times, left_iris_centers, right_iris_centers, output_graph_path)
+            create_video_from_frames(frame_filenames, output_video_path, fps)
+            # save the outputs
+            video_file, graph_file = save_outputs(output_video_path, output_graph_path, "VOMS")
 
-        plot_eye_movement_graph(left_eye_positions, right_eye_positions, frame_times, output_graph_path)
-        create_video_from_frames(frame_filenames, output_video_path)
-
-        # save the outputs
-        video_file, graph_file = save_outputs(output_video_path, output_graph_path, "VOMS")
-
-        return {"message": "Frames captured successfully", "video": video_file,  "graph": graph_file}
+            return {"message": "Frames captured successfully", "video": video_file,  "graph": graph_file}
 
     finally:
         os.remove(temp_video_file_path)
 
-def plot_eye_movement_graph(left_eye_positions, right_eye_positions, frame_times, output_graph_path):
-    left_x_smooth = gaussian_filter1d(left_eye_positions, sigma=2)
-    right_x_smooth = gaussian_filter1d(right_eye_positions, sigma=2)
+def plot_iris_center_graph(times, left_iris_centers, right_iris_centers, output_graph_path):
+    print('Plotting graph')
+    # Extract the X coordinates of the iris centers
+    left_x = [pos[0] for pos in left_iris_centers]
+    right_x = [pos[0] for pos in right_iris_centers]
 
+    # Detrend to remove any linear drift and normalize by subtracting the mean
+    left_x_detrended = detrend(left_x - np.mean(left_x))
+    right_x_detrended = detrend(right_x - np.mean(right_x))
+
+    # Smooth the data if needed using a moving average
+    window_size = 15  # Adjust the window size for smoothing as needed
+    left_x_smoothed = np.convolve(left_x_detrended, np.ones(window_size)/window_size, mode='same')
+    right_x_smoothed = np.convolve(right_x_detrended, np.ones(window_size)/window_size, mode='same')
+
+    # Plot the smoothed, normalized data
     plt.figure(figsize=(10, 6))
-
-    plt.plot(frame_times, left_x_smooth, label="Left Eye X", color="blue", linestyle="--")
-    plt.plot(frame_times, right_x_smooth, label="Right Eye X", color="red", linestyle="-")
-
+    plt.plot(times, left_x_smoothed, color="red", label="Left Eye Iris Center X Position")
+    plt.plot(times, right_x_smoothed, color="blue", label="Right Eye Iris Center X Position")
+    
+    # Set the y-axis limits for a better sinusoidal appearance
+    plt.ylim(-50, 50)  # Adjust these values based on the data range
+    
     plt.title("Horizontal Eye Movement (X-axis) Over Time")
-    plt.xlabel("Time (seconds)")
-    plt.ylabel("Horizontal Position")
+    plt.xlabel("Time (milliseconds)")
+    plt.ylabel("Horizontal Position (Normalized)")
     plt.legend()
+    plt.grid(True)
     plt.savefig(output_graph_path)
     plt.close()
