@@ -114,6 +114,10 @@ def save_outputs(temp_video_path, temp_graph_path, output_type):
 # Calculate crop parameters
 def cropFrame(frame):
     print('Cropping frame')
+    # check if already 640x480
+    if frame.shape[0] == 480 and frame.shape[1] == 640:
+        return frame
+        
     zoom_factor = 1.5 
     top_offset = 200 
     h, w = frame.shape[:2]
