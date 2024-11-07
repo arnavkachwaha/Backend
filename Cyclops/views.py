@@ -6,6 +6,9 @@ from Cyclops.utils import processVideoForPLR , processVideoForVOMS
 from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 
+@csrf_exempt
+def health(request):
+    return JsonResponse({'status': 'OK'}, status=200)
 
 @csrf_exempt
 def upload_form(request):
