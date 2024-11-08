@@ -30,8 +30,8 @@ def upload_form(request):
                 graph_path = result.get('graph')
 
                 if video_path and os.path.exists(video_path) and graph_path and os.path.exists(graph_path):
-                    video_download_url = request.build_absolute_uri(f'/media/{videoType}/{os.path.basename(video_path)}')
-                    graph_download_url = request.build_absolute_uri(f'/media/{videoType}/{os.path.basename(graph_path)}')
+                    video_download_url = request.build_absolute_uri(f'/media/{videoType}/outputs/videos/{os.path.basename(video_path)}')
+                    graph_download_url = request.build_absolute_uri(f'/media/{videoType}/outputs/graphs/{os.path.basename(graph_path)}')
 
                     return JsonResponse({
                         'video_download_url': video_download_url,
