@@ -1,6 +1,6 @@
 import cv2
 import os
-import subprocess
+import shutil
 import matplotlib
 import numpy as np
 import mediapipe as mp
@@ -53,26 +53,36 @@ def processVideoForPLR(video_file):
         while cap.isOpened():
             ret, frame = cap.read()
             if ret:
-                frame_filename = f"frame_{frame_save_count}.jpg"
-                full_frame_path = os.path.join(FRAMES_DIR, frame_filename)
                 print(f"Processing frame {all_frames_count} of {total_frames}")
                 all_frames_count += 1
-                predicted_frame, radius = model_evaluator.get_predicted_output(cropFrame(frame))
-                if radius != 0:
-                    frame_radius.append(radius)
-                    # hard save for debug 
-                    # cv2.imwrite(full_frame_path, predicted_frame)
-                    # frame_filenames.append(full_frame_path)
-                    # frame_save_count += 1
-                    
-                    # save to temp folder for prod 
-                    try: 
+                # Hard save for local, temp for prod
+                # if radius != 0:
+                #     frame_radius.append(radius)
+                #     cv2.imwrite(full_frame_path, predicted_frame)
+                #     frame_filenames.append(full_frame_path)
+                #     frame_save_count += 1
+                # elif(radius == 0 and frame_radius):
+                #     frame_radius.append(frame_radius[-1])
+                #     last_frame_filename = f"frame_{frame_save_count - 1}.png"
+                #     last_frame_path = os.path.join(FRAMES_DIR, last_frame_filename)
+                #     shutil.copy(last_frame_path, full_frame_path)
+                try: 
+                    predicted_frame, radius = model_evaluator.get_predicted_output(frame)
+                    if radius != 0:
+                        frame_radius.append(radius)
                         with NamedTemporaryFile(delete=False, suffix=".jpg") as temp_frame:
                             cv2.imwrite(temp_frame.name, predicted_frame)
                             frame_filenames.append(temp_frame.name)
-                            frame_save_count += 1
-                    except Exception as e:
-                        print(f"Error saving frame: {e}")
+                    elif radius == 0 and frame_radius:
+                        frame_radius.append(frame_radius[-1])
+                        # Copy the last saved frame to the new temporary file
+                        last_frame_path = frame_filenames[-1]
+                        with NamedTemporaryFile(delete=False, suffix=".jpg") as temp_frame:
+                            shutil.copy(last_frame_path, temp_frame.name)
+                            frame_filenames.append(temp_frame.name)
+                    frame_save_count += 1
+                except Exception as e:
+                    print(f"Error saving frame: {e}")
             else:
                 break
 
@@ -169,20 +179,20 @@ def cropFrame(frame):
 
 def getPlrMetrics(frame_radius):
     print('Calculating PLR metrics')
-    flashPoint = 30
+    flashPoint = 35
     maxPD = max(frame_radius[0:flashPoint])
-    minPD = min(frame_radius)
+    minPD = min(frame_radius[flashPoint:])
     maxPDIndex = frame_radius.index(maxPD)
     minPDIndex = frame_radius.index(minPD)
-    MCV =  (maxPD - minPD) / (minPDIndex - maxPDIndex)
-    _75PerOfMaxPDIndex= next((i for i in range(minPDIndex + 1, len(frame_radius)) if frame_radius[i] >= (maxPD * 0.75)),0)
-    _75PerOfMaxPD = frame_radius[_75PerOfMaxPDIndex]
-    PRT   = _75PerOfMaxPDIndex - minPDIndex
-    Latency = next((i for i in range(flashPoint, minPDIndex) if frame_radius[i] < maxPD - 1),0) - flashPoint
-    return [maxPD, minPD, MCV, _75PerOfMaxPD, PRT, Latency]
+    _10PerAftrFlashPt = next((i for i in range(maxPDIndex, len(frame_radius)) if frame_radius[i] <= (maxPD * 0.10)),0)
+    mcv =  np.abs((maxPD - minPD) / (minPDIndex - maxPDIndex))
+    _75PerOfMaxPDIndex= next((i for i in range(minPDIndex, len(frame_radius)) if frame_radius[i] >= (maxPD * 0.75)),0)
+    _75PerOfMaxPD = str(round(np.abs(_75PerOfMaxPDIndex - minPD) / 30,2)) + "msec"
+    Latency = str(round(np.abs(maxPDIndex - _10PerAftrFlashPt) / 30, 2)) + "msec"
+    return [maxPD, minPD, mcv, _75PerOfMaxPD, Latency]
 
-def plot_radius_over_time(frame_radius, plrMetrics, fps, video_file):
-    maxPD, minPD, MCV, _75PerOfMaxPD, PRT, Latency = plrMetrics
+def plot_radius_over_time(frame_radius, plrMetrics, fps):
+    maxPD, minPD, mcv, _75PerOfMaxPD, Latency = plrMetrics
     # Remove outliers from the frame_radius array
     filtered_radius = remove_outliers(frame_radius)
 
@@ -209,7 +219,7 @@ def plot_radius_over_time(frame_radius, plrMetrics, fps, video_file):
 
     # Create a box on the right side of the plot with the PLR metrics
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-    metrics_text = f"maxPD: {maxPD}\nminPD: {minPD}\nMCV: {MCV:.3f}\n75% of maxPD: {_75PerOfMaxPD}\nPRT: {PRT}\nLatency: {Latency}"
+    metrics_text = f"maxPD: {maxPD}\nminPD: {minPD}\nMCV: {mcv:.3f}\n75% of maxPD: {_75PerOfMaxPD}\nLatency: {Latency}"
 
     # Add text box on the right side of the plot, moving it further to the right
     fig.text(0.8, 0.5, metrics_text, fontsize=10, bbox=props)  

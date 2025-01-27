@@ -60,11 +60,10 @@ class ModelEvaluator:
         # Check brightness of the image
         brightness = self.calculate_brightness(image)
 
-        # skip step for now, need to revisit this after testing
-        # If brightness is less than 70, return with radius 0
-        # if (brightness < 25):
-        #     print(f"Frame discarded due to low brightness: {brightness}")
-        #     return image, 0 
+        # If brightness is less than 50, return with radius 0
+        if brightness < 50:
+            print(f"Frame discarded due to low brightness: {brightness}")
+            return image, 0 
         
         # Preprocess the image
         input_data = self.preprocess_image(image)
