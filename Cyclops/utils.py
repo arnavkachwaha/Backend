@@ -195,7 +195,7 @@ def getPlrMetrics(frame_radius):
     mcv =  np.abs((maxPD - minPD) / (minPDIndex - maxPDIndex))
     _75PerOfMaxPDIndex= next((i for i in range(minPDIndex, len(frame_radius)) if frame_radius[i] >= (maxPD * 0.75)),0)
     _75PerOfMaxPD = str(round(np.abs(_75PerOfMaxPDIndex - minPD) / 30,2)) + "msec"
-    Latency = str(round(np.abs(maxPDIndex - _10PerAftrFlashPt) / 30, 2)) + "msec"
+    Latency = str(round(np.abs(maxPDIndex - _10PerAftrFlashPt) / 30, 4)) + "msec"
     return [maxPD, minPD, mcv, _75PerOfMaxPD, Latency]
 
 def plot_radius_over_time(frame_radius, plrMetrics, fps):
