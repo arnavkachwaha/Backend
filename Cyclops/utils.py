@@ -34,6 +34,11 @@ def processVideoForPLR(video_file):
     # save the input video, hard save for local data collection 
     temp_video_file_path, timestamp = save_inputs(video_file, "PLR")
 
+    # initialize temp paths for finally block 
+    temp_video_path = None
+    temp_graph_path = None
+    frame_filenames = []
+
     try:
         cap = cv2.VideoCapture(temp_video_file_path)
 
@@ -89,7 +94,7 @@ def processVideoForPLR(video_file):
         cap.release()
         
         print('Plotting graph')
-        temp_graph_path = plot_radius_over_time(frame_radius, getPlrMetrics(frame_radius), fps, video_file)
+        temp_graph_path = plot_radius_over_time(frame_radius, getPlrMetrics(frame_radius), fps)
         print('Creating video')
         temp_video_path = create_video_from_frames(frame_filenames, fps)
         vid_file, graph_file = save_outputs(temp_video_path, temp_graph_path, "PLR", timestamp)
@@ -97,9 +102,11 @@ def processVideoForPLR(video_file):
         return {"message": "Frames captured successfully", "video": vid_file, "graph": graph_file}
     
     finally:
-        # os.remove(temp_video_file_path) # hard save for local data collection
-        os.remove(temp_graph_path)
-        os.remove(temp_video_path)
+        # Ensure cleanup in the finally block
+        if temp_video_path:
+            os.remove(temp_video_path)
+        if temp_graph_path:
+            os.remove(temp_graph_path)
         for frame in frame_filenames:
             os.remove(frame)
         
@@ -188,7 +195,7 @@ def getPlrMetrics(frame_radius):
     mcv =  np.abs((maxPD - minPD) / (minPDIndex - maxPDIndex))
     _75PerOfMaxPDIndex= next((i for i in range(minPDIndex, len(frame_radius)) if frame_radius[i] >= (maxPD * 0.75)),0)
     _75PerOfMaxPD = str(round(np.abs(_75PerOfMaxPDIndex - minPD) / 30,2)) + "msec"
-    Latency = str(round(np.abs(maxPDIndex - _10PerAftrFlashPt) / 30, 2)) + "msec"
+    Latency = str(round(np.abs(maxPDIndex - _10PerAftrFlashPt) / 30, 4)) + "msec"
     return [maxPD, minPD, mcv, _75PerOfMaxPD, Latency]
 
 def plot_radius_over_time(frame_radius, plrMetrics, fps):
