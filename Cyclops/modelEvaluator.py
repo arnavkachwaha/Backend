@@ -10,23 +10,29 @@ import torchvision.transforms as transforms
 class ModelEvaluator:
     # Load the model and set it to evaluation mode
     def __init__(self):
+        print("GPU Available: ", torch.cuda.is_available())
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.normal_transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.6019, 0.4767, 0.4340], std=[0.229, 0.224, 0.225]) # will need to update these values based on the dataset used for training
         ])
-        self.model = segformerModelDef.CyclopsSegformerModule()
-        state_dict = torch.load("/Users/arnavkachwaha/Desktop/Insight-Server/segformer_model.pth")
+        self.model = segformerModelDef.CyclopsSegformerModule().to(self.device)
+        state_dict = torch.load("segformer_model.pth", map_location=self.device)
         self.model.load_state_dict(state_dict, strict=False)
         self.model.eval()
 
-    # Preprocess the image to get it ready for the model
+    # OpenCV
     def preprocess_image(self, image: np.ndarray, input_shape=(1, 3, 480, 640)) -> torch.Tensor:
-        # Convert numpy array (image) to PIL, resize, and apply transformations
-        pil_image = Image.fromarray(image)
-        resized_image = pil_image.resize((input_shape[3], input_shape[2]))
+        # Convert the image from BGR (OpenCV format) to RGB
+        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        # Resize the image
+        resized_image = cv2.resize(rgb_image, (input_shape[3], input_shape[2]))
+
+        # Convert to tensor and normalize
         tensor_image = self.normal_transform(resized_image).unsqueeze(0)  # Add batch dimension
 
-        return tensor_image
+        return tensor_image.to(self.device)
 
     # Postprocess the mask to get the final segmentation mask
     def postprocess_mask(self, mask: torch.Tensor, output_shape=(480, 640)) -> np.ndarray:
@@ -75,11 +81,11 @@ class ModelEvaluator:
         # Draw the circle onto the blended image
         if center != (0, 0):
             cv2.circle(image, center, radius, (0, 255, 0), 2)  # Green circle
-            cv2.putText(image, str(radius), 
+            cv2.putText(image, str(radius*2), 
                         org = (center[0] + radius + 1, center[1] + radius + 1), 
                         fontFace=cv2.FONT_HERSHEY_SIMPLEX,
                         fontScale = 1, 
-                        color = (255, 0, 0), 
+                        color = (255, 255, 0), 
                         thickness = 2)
         
         return image, radius

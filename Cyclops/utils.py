@@ -11,6 +11,7 @@ from django.conf import settings
 from tempfile import NamedTemporaryFile
 from .modelEvaluator import ModelEvaluator
 from moviepy.editor import ImageSequenceClip
+import datetime
 from scipy.signal import butter, filtfilt, detrend
 
 mp_face_mesh = mp.solutions.face_mesh
@@ -24,10 +25,14 @@ def processVideoForPLR(video_file):
     if not os.path.exists(FRAMES_DIR):
         os.makedirs(FRAMES_DIR)
 
-    with NamedTemporaryFile(delete=False, suffix=".mov") as temp_video_file:
-        temp_video_file.write(video_file.read())
-        temp_video_file.flush()
-        temp_video_file_path = temp_video_file.name
+    print('Writing video to temp file')
+    # with NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video_file:
+    #     temp_video_file.write(video_file.read())
+    #     temp_video_file.flush()
+    #     temp_video_file_path = temp_video_file.name
+
+    # save the input video, hard save for local data collection 
+    temp_video_file_path, timestamp = save_inputs(video_file, "PLR")
 
     try:
         cap = cv2.VideoCapture(temp_video_file_path)
@@ -40,37 +45,124 @@ def processVideoForPLR(video_file):
         frame_filenames = []
         frame_radius = []
 
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        all_frames_count = 1
+
         # Capture and process each frame
+        print('Processing frames')
         while cap.isOpened():
             ret, frame = cap.read()
             if ret:
-                frame_filename = f"frame_{frame_save_count}.png"
-                full_frame_path = os.path.join(FRAMES_DIR, frame_filename)
-                # frame = cropFrame(frame)
-                predicted_frame, radius = model_evaluator.get_predicted_output(frame)
-                if radius != 0:
-                    frame_radius.append(radius)
-                    cv2.imwrite(full_frame_path, predicted_frame)
-                    frame_filenames.append(full_frame_path)
-                elif(radius == 0 and frame_radius):
-                    frame_radius.append(frame_radius[-1])
-                    last_frame_filename = f"frame_{frame_save_count - 1}.png"
-                    last_frame_path = os.path.join(FRAMES_DIR, last_frame_filename)
-                    shutil.copy(last_frame_path, full_frame_path)
-                frame_save_count += 1
+                print(f"Processing frame {all_frames_count} of {total_frames}")
+                all_frames_count += 1
+                # Hard save for local, temp for prod
+                # if radius != 0:
+                #     frame_radius.append(radius)
+                #     cv2.imwrite(full_frame_path, predicted_frame)
+                #     frame_filenames.append(full_frame_path)
+                #     frame_save_count += 1
+                # elif(radius == 0 and frame_radius):
+                #     frame_radius.append(frame_radius[-1])
+                #     last_frame_filename = f"frame_{frame_save_count - 1}.png"
+                #     last_frame_path = os.path.join(FRAMES_DIR, last_frame_filename)
+                #     shutil.copy(last_frame_path, full_frame_path)
+                try: 
+                    predicted_frame, radius = model_evaluator.get_predicted_output(frame)
+                    if radius != 0:
+                        frame_radius.append(radius)
+                        with NamedTemporaryFile(delete=False, suffix=".jpg") as temp_frame:
+                            cv2.imwrite(temp_frame.name, predicted_frame)
+                            frame_filenames.append(temp_frame.name)
+                    elif radius == 0 and frame_radius:
+                        frame_radius.append(frame_radius[-1])
+                        # Copy the last saved frame to the new temporary file
+                        last_frame_path = frame_filenames[-1]
+                        with NamedTemporaryFile(delete=False, suffix=".jpg") as temp_frame:
+                            shutil.copy(last_frame_path, temp_frame.name)
+                            frame_filenames.append(temp_frame.name)
+                    frame_save_count += 1
+                except Exception as e:
+                    print(f"Error saving frame: {e}")
             else:
                 break
 
         cap.release()
-        output_video_path = os.path.join(settings.MEDIA_ROOT, "PLR", "output_video.mp4")
-        output_graph_path = plot_radius_over_time(frame_radius, getPlrMetrics(frame_radius), fps)
-        create_video_from_frames(frame_filenames, output_video_path, fps)
-        return {"message": "Frames captured successfully", "video": output_video_path, "graph": output_graph_path}
+        
+        print('Plotting graph')
+        temp_graph_path = plot_radius_over_time(frame_radius, getPlrMetrics(frame_radius), fps, video_file)
+        print('Creating video')
+        temp_video_path = create_video_from_frames(frame_filenames, fps)
+        vid_file, graph_file = save_outputs(temp_video_path, temp_graph_path, "PLR", timestamp)
+
+        return {"message": "Frames captured successfully", "video": vid_file, "graph": graph_file}
     
     finally:
-        os.remove(temp_video_file_path)
+        # os.remove(temp_video_file_path) # hard save for local data collection
+        os.remove(temp_graph_path)
+        os.remove(temp_video_path)
+        for frame in frame_filenames:
+            os.remove(frame)
+        
 
+def save_outputs(temp_video_path, temp_graph_path, output_type, timestamp=False):
+    try:
+        with open(temp_video_path, 'rb') as video_file, open(temp_graph_path, 'rb') as graph_file:
+            video_data = video_file.read()
+            graph_data = graph_file.read()
+
+            # generate file_name based on date and timestamp
+            if not timestamp:
+                timestamp  = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+            
+            vid_dir = os.path.join(settings.MEDIA_ROOT, output_type, "outputs", "videos")
+            graph_dir = os.path.join(settings.MEDIA_ROOT, output_type, "outputs", "graphs")
+
+            if not os.path.exists(vid_dir):
+                os.makedirs(vid_dir)
+            if not os.path.exists(graph_dir):
+                os.makedirs(graph_dir)
+
+            vid_path = os.path.join(vid_dir, f"{timestamp}.mp4")
+            graph_path = os.path.join(graph_dir, f"{timestamp}.jpg")
+
+            with open(vid_path, 'wb') as output_video_file:
+                output_video_file.write(video_data)
+
+            with open(graph_path, 'wb') as output_graph_file:
+                output_graph_file.write(graph_data)
+        
+        return vid_path, graph_path
+
+    except Exception as e:
+        print(f"Error saving outputs: {e}")
+        return None, None
+
+def save_inputs(video_file, output_type):
+    try:
+        # save the InMempryUploadedFile to media folder
+        timestamp  = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        video_dir = os.path.join(settings.MEDIA_ROOT, output_type, "inputs")
+
+        if not os.path.exists(video_dir):
+            os.makedirs(video_dir)
+
+        video_path = os.path.join(video_dir, f"{timestamp}.mp4")
+
+        with open(video_path, 'wb') as output_video_file:
+            output_video_file.write(video_file.read())
+
+        return video_path, timestamp
+        
+    except Exception as e:
+        print(f"Error saving inputs: {e}")
+        return None, None
+
+# Calculate crop parameters
 def cropFrame(frame):
+    # check if already 640x480
+    if frame.shape[0] == 480 and frame.shape[1] == 640:
+        return frame
+    print('Cropping frame')
     zoom_factor = 1.5 
     top_offset = 200 
     h, w = frame.shape[:2]
@@ -86,6 +178,7 @@ def cropFrame(frame):
     return (resized_frame)
 
 def getPlrMetrics(frame_radius):
+    print('Calculating PLR metrics')
     flashPoint = 35
     maxPD = max(frame_radius[0:flashPoint])
     minPD = min(frame_radius[flashPoint:])
@@ -131,11 +224,13 @@ def plot_radius_over_time(frame_radius, plrMetrics, fps):
     # Add text box on the right side of the plot, moving it further to the right
     fig.text(0.8, 0.5, metrics_text, fontsize=10, bbox=props)  
 
-    output_graph_path = os.path.join(settings.MEDIA_ROOT, "PLR", "output_graph.png")
-    plt.savefig(output_graph_path, format='png')
-    plt.close()
-
-    return output_graph_path
+    # save to temp output_graph_path
+    with NamedTemporaryFile(delete=False, suffix=".jpg") as temp_graph_file:
+        plt.savefig(temp_graph_file.name)
+        plt.close()
+        return temp_graph_file.name
+    
+    return ""
 
 def remove_outliers(data, threshold=2.5):
     z_scores = zscore(data)
@@ -148,26 +243,34 @@ def apply_lowpass_filter(data, cutoff, fs, order=5):
     filtered_data = filtfilt(b, a, data)
     return filtered_data
 
-def create_video_from_frames(frame_filenames, output_video_path, fps=30):
+def create_video_from_frames(frame_filenames, fps=30):
     clip = ImageSequenceClip(frame_filenames, fps=fps)
-    clip.write_videofile(output_video_path, codec='libx264')
+    with NamedTemporaryFile(delete=False, suffix=".mp4") as temp_output_video_file:
+        clip.write_videofile(temp_output_video_file.name, codec='libx264')
+        return temp_output_video_file.name
+
+    return ""
 
 def processVideoForVOMS(video_file):
+    print('Processing video for VOMS') 
     FRAMES_DIR = os.path.join(settings.MEDIA_ROOT, "frames", "VOMS")
     if not os.path.exists(FRAMES_DIR):
         os.makedirs(FRAMES_DIR)
 
-    with NamedTemporaryFile(delete=False, suffix=".mov") as temp_video_file:
-        temp_video_file.write(video_file.read())
-        temp_video_file.flush()
-        temp_video_file_path = temp_video_file.name
+    # with NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video_file:
+    #     temp_video_file.write(video_file.read())
+    #     temp_video_file.flush()
+    #     temp_video_file_path = temp_video_file.name
 
+    # save the input video, hard save for local data collection
+    temp_video_file_path, timestamp = save_inputs(video_file, "VOMS")
+    
     try:
         with mp.solutions.face_mesh.FaceMesh(
             max_num_faces=1,
             refine_landmarks=True,
             min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
+            min_tracking_confidence=0.5,
         ) as face_mesh:
 
             extreme_points = {
@@ -194,6 +297,8 @@ def processVideoForVOMS(video_file):
                 ret, frame = cap.read()
                 if not ret:
                     break
+
+                print(f"Processing frame {frame_save_count}")
 
                 results = face_mesh.process(frame)
 
@@ -232,7 +337,7 @@ def processVideoForVOMS(video_file):
                         right_iris_centers.append((r_cx, r_cy))
 
                     # Save the processed frame
-                    frame_filename = f"frame_{frame_save_count}.png"
+                    frame_filename = f"frame_{frame_save_count}.jpg"
                     full_frame_path = os.path.join(FRAMES_DIR, frame_filename)
                     cv2.imwrite(full_frame_path, frame)
                     frame_filenames.append(full_frame_path)
@@ -243,18 +348,22 @@ def processVideoForVOMS(video_file):
             # Calculate times for each frame for plotting
             times = np.arange(0, len(left_iris_centers)) * time_per_frame
 
-            output_video_path = os.path.join(settings.MEDIA_ROOT, "VOMS", "output_video.mp4")
-            output_graph_path = os.path.join(settings.MEDIA_ROOT, "VOMS", "output_graph.png")
+            temp_graph_file = plot_iris_center_graph(times, left_iris_centers, right_iris_centers)
+            temp_video_path = create_video_from_frames(frame_filenames, fps)
+            # save the outputs
+            video_file, graph_file = save_outputs(temp_video_path, temp_graph_file, "VOMS", timestamp)
 
-            plot_iris_center_graph(times, left_iris_centers, right_iris_centers, output_graph_path)
-            create_video_from_frames(frame_filenames, output_video_path, fps)
-
-            return {"message": "Frames captured successfully", "video": output_video_path,  "graph": output_graph_path}
+            return {"message": "Frames captured successfully", "video": video_file,  "graph": graph_file}
 
     finally:
-        os.remove(temp_video_file_path)
+        # os.remove(temp_video_file_path) hard save for local data collection
+        os.remove(temp_graph_file)
+        os.remove(temp_video_path)
+        for frame in frame_filenames:
+            os.remove(frame)
 
-def plot_iris_center_graph(times, left_iris_centers, right_iris_centers, output_graph_path):
+def plot_iris_center_graph(times, left_iris_centers, right_iris_centers):
+    print('Plotting graph')
     # Extract the X coordinates of the iris centers
     left_x = [pos[0] for pos in left_iris_centers]
     right_x = [pos[0] for pos in right_iris_centers]
@@ -276,10 +385,16 @@ def plot_iris_center_graph(times, left_iris_centers, right_iris_centers, output_
     # Set the y-axis limits for a better sinusoidal appearance
     plt.ylim(-50, 50)  # Adjust these values based on the data range
     
-    plt.title("Horizontal Eye Movement (X-axis) Over Time")
-    plt.xlabel("Time (milliseconds)")
-    plt.ylabel("Horizontal Position (Normalized)")
-    plt.legend()
-    plt.grid(True)
-    plt.savefig(output_graph_path)
-    plt.close()
+    with NamedTemporaryFile(delete=False, suffix=".jpg") as temp_graph_file:
+        plt.title("Horizontal Eye Movement (X-axis) Over Time")
+        plt.xlabel("Time (milliseconds)")
+        plt.ylabel("Horizontal Position (Normalized)")
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(temp_graph_file.name)
+        plt.close()
+
+        return temp_graph_file.name
+    
+    return ""
+ 
