@@ -1,2 +1,5 @@
 media/
 .DS_Store
+/venv
+*/__pycache__/*
+*/*/__pycache__/*
