@@ -9,7 +9,7 @@ from scipy.stats import zscore
 import matplotlib.pyplot as plt
 from django.conf import settings
 from tempfile import NamedTemporaryFile
-from .modelEvaluator import ModelEvaluator
+from .yoloEvaluator import YOLOEvaluator
 from moviepy.editor import ImageSequenceClip
 import datetime
 from scipy.signal import butter, filtfilt, detrend
@@ -20,7 +20,7 @@ matplotlib.use('Agg')
 def processVideoForPLR(video_file):
     FRAMES_DIR = os.path.join(settings.MEDIA_ROOT, "frames", "PLR")
 
-    model_evaluator = ModelEvaluator()
+    model_evaluator = YOLOEvaluator()
     
     if not os.path.exists(FRAMES_DIR):
         os.makedirs(FRAMES_DIR)

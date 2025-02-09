@@ -8,7 +8,7 @@ from . import segformerModelDef
 import torchvision.transforms as transforms
 from .roboflowService import RoboflowService
 
-class ModelEvaluator:
+class SegformerEvaluator:
     # Load the model and set it to evaluation mode
     def __init__(self):
         print("GPU Available: ", torch.cuda.is_available())
@@ -18,7 +18,7 @@ class ModelEvaluator:
             transforms.Normalize(mean=[0.6019, 0.4767, 0.4340], std=[0.229, 0.224, 0.225]) # will need to update these values based on the dataset used for training
         ])
         self.model = segformerModelDef.CyclopsSegformerModule().to(self.device)
-        state_dict = torch.load("segformer_model.pth", map_location=self.device)
+        state_dict = torch.load("models/segformer_model.pth", map_location=self.device)
         self.model.load_state_dict(state_dict, strict=False)
         self.model.eval()
         self.roboflowService = RoboflowService()
