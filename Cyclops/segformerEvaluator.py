@@ -6,8 +6,9 @@ from PIL import Image
 from typing import Tuple
 from . import segformerModelDef
 import torchvision.transforms as transforms
+from .roboflowService import RoboflowService
 
-class ModelEvaluator:
+class SegformerEvaluator:
     # Load the model and set it to evaluation mode
     def __init__(self):
         print("GPU Available: ", torch.cuda.is_available())
@@ -17,9 +18,11 @@ class ModelEvaluator:
             transforms.Normalize(mean=[0.6019, 0.4767, 0.4340], std=[0.229, 0.224, 0.225]) # will need to update these values based on the dataset used for training
         ])
         self.model = segformerModelDef.CyclopsSegformerModule().to(self.device)
-        state_dict = torch.load("segformer_model.pth", map_location=self.device)
+        state_dict = torch.load("models/segformer_model.pth", map_location=self.device)
         self.model.load_state_dict(state_dict, strict=False)
         self.model.eval()
+        self.roboflowService = RoboflowService()
+        self.IRIS_MM = 11.7 # Iris diameter in mm
 
     # OpenCV
     def preprocess_image(self, image: np.ndarray, input_shape=(1, 3, 480, 640)) -> torch.Tensor:
@@ -56,7 +59,7 @@ class ModelEvaluator:
         return (0, 0), 0  # Return default values if no contours found
 
     # Overlay the mask and circle on the original image
-    def overlay_mask_on_image(self, image: np.ndarray) -> np.ndarray:
+    def overlay_mask_on_image(self, image: np.ndarray) -> Tuple[np.ndarray, float]:
         # Check brightness of the image
         brightness = self.calculate_brightness(image)
 
@@ -76,25 +79,54 @@ class ModelEvaluator:
         mask = self.postprocess_mask(output.logits)
         
         # Fit the circle to the mask
-        center, radius = self.fit_circle_to_mask(mask)
+        center, pixel_radius = self.fit_circle_to_mask(mask)
+        pixel_diameter = pixel_radius * 2
+
+        # TODO: Convert Radius from pixels to mm
+        mm_diameter = self.get_mm_diameter(image, pixel_diameter)
+        print(f"Diameter: {pixel_diameter} pixels, {mm_diameter} mm")
 
         # Draw the circle onto the blended image
         if center != (0, 0):
-            cv2.circle(image, center, radius, (0, 255, 0), 2)  # Green circle
-            cv2.putText(image, str(radius*2), 
-                        org = (center[0] + radius + 1, center[1] + radius + 1), 
+            cv2.circle(image, center, pixel_radius, (0, 255, 0), 2)  # Green circle
+            cv2.putText(image, str(mm_diameter*2), 
+                        org = (center[0] + pixel_radius + 1, center[1] + pixel_radius + 1), 
                         fontFace=cv2.FONT_HERSHEY_SIMPLEX,
                         fontScale = 1, 
                         color = (255, 255, 0), 
                         thickness = 2)
         
-        return image, radius
+        return image, mm_diameter
 
     # Function to return the final predicted image with mask and circle
-    def get_predicted_output(self, image: np.ndarray) -> np.ndarray:
+    # TODO: refactor or remove this function and just call overlay_mask_on_image 
+    def get_predicted_output(self, image: np.ndarray) -> Tuple[np.ndarray, float]:
         return self.overlay_mask_on_image(image)
     
     # Add a function to calculate the brightness of the image
     def calculate_brightness(self, image: np.ndarray) -> float:
         grayscale_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         return np.mean(grayscale_image)  # Return the average pixel value
+
+    # Add a function to convert the radius from pixels to mm
+    def get_mm_diameter(self, image: np.ndarray, pixel_diameter: int) -> float:
+        detected_width = self.roboflowService.process_image(image)
+        print("detected_width: ", detected_width)
+
+        if detected_width == 0.0:
+            return 0.0
+
+        # TODO: determine minimum width of detection
+        # sometimes the pupil is detected and mislabeled as iris and will be much smaller
+        if detected_width < 50:
+            return 0.0
+
+        # calculate the mm per pixel
+        scale_factor = self.IRIS_MM / detected_width
+
+        # convert the radius from pixels to mm
+        mm_diameter = pixel_diameter * scale_factor
+        return round(mm_diameter, 2)
+
+
+        
