@@ -311,8 +311,10 @@ def processVideoForVOMS(video_file):
                     break
 
                 # rotate the frame by 90 degrees clockwise
-                frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
-                
+                # check if in landscape mode
+                if frame.shape[1] > frame.shape[0]:
+                    frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+
                 print(f"Processing frame {frame_save_count}")
 
                 results = face_mesh.process(frame)
