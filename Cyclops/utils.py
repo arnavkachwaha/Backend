@@ -304,11 +304,15 @@ def processVideoForVOMS(video_file):
             fps = cap.get(cv2.CAP_PROP_FPS)
             time_per_frame = 1000 / fps  # Time in milliseconds
 
+
             while cap.isOpened():
                 ret, frame = cap.read()
                 if not ret:
                     break
 
+                # rotate the frame by 90 degrees clockwise
+                frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+                
                 print(f"Processing frame {frame_save_count}")
 
                 results = face_mesh.process(frame)
