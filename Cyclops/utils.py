@@ -48,7 +48,7 @@ def processVideoForPLR(video_file):
         fps = cap.get(cv2.CAP_PROP_FPS)
         frame_save_count = 1
         frame_filenames = []
-        frame_radius = []
+        frame_diameter = []
 
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         all_frames_count = 1
@@ -61,25 +61,25 @@ def processVideoForPLR(video_file):
                 print(f"Processing frame {all_frames_count} of {total_frames}")
                 all_frames_count += 1
                 # Hard save for local, temp for prod
-                # if radius != 0:
-                #     frame_radius.append(radius)
+                # if diameter != 0:
+                #     frame_diameter.append(diameter)
                 #     cv2.imwrite(full_frame_path, predicted_frame)
                 #     frame_filenames.append(full_frame_path)
                 #     frame_save_count += 1
-                # elif(radius == 0 and frame_radius):
-                #     frame_radius.append(frame_radius[-1])
+                # elif(diameter == 0 and frame_diameter):
+                #     frame_diameter.append(frame_diameter[-1])
                 #     last_frame_filename = f"frame_{frame_save_count - 1}.png"
                 #     last_frame_path = os.path.join(FRAMES_DIR, last_frame_filename)
                 #     shutil.copy(last_frame_path, full_frame_path)
                 try: 
-                    predicted_frame, radius = model_evaluator.get_predicted_output(frame)
-                    if radius != 0:
-                        frame_radius.append(radius)
+                    predicted_frame, diameter = model_evaluator.get_predicted_output(frame)
+                    if diameter != 0:
+                        frame_diameter.append(diameter)
                         with NamedTemporaryFile(delete=False, suffix=".jpg") as temp_frame:
                             cv2.imwrite(temp_frame.name, predicted_frame)
                             frame_filenames.append(temp_frame.name)
-                    elif radius == 0 and frame_radius:
-                        frame_radius.append(frame_radius[-1])
+                    elif diameter == 0 and frame_diameter:
+                        frame_diameter.append(frame_diameter[-1])
                         # Copy the last saved frame to the new temporary file
                         last_frame_path = frame_filenames[-1]
                         with NamedTemporaryFile(delete=False, suffix=".jpg") as temp_frame:
@@ -94,7 +94,7 @@ def processVideoForPLR(video_file):
         cap.release()
         
         print('Plotting graph')
-        temp_graph_path = plot_radius_over_time(frame_radius, getPlrMetrics(frame_radius), fps)
+        temp_graph_path = plot_diameter_over_time(frame_diameter, getPlrMetrics(frame_diameter, fps), fps)
         print('Creating video')
         temp_video_path = create_video_from_frames(frame_filenames, fps)
         vid_file, graph_file = save_outputs(temp_video_path, temp_graph_path, "PLR", timestamp)
@@ -184,31 +184,35 @@ def cropFrame(frame):
     resized_frame = cv2.resize(np.array(cropped_frame), (640, 480))
     return (resized_frame)
 
-def getPlrMetrics(frame_radius):
+def getPlrMetrics(frame_diameter, fps):
     print('Calculating PLR metrics')
     flashPoint = 35
-    maxPD = max(frame_radius[0:flashPoint])
-    minPD = min(frame_radius[flashPoint:])
-    maxPDIndex = frame_radius.index(maxPD)
-    minPDIndex = frame_radius.index(minPD)
-    _10PerAftrFlashPt = next((i for i in range(maxPDIndex, len(frame_radius)) if frame_radius[i] <= (maxPD * 0.10)),0)
-    mcv =  np.abs((maxPD - minPD) / (minPDIndex - maxPDIndex))
-    _75PerOfMaxPDIndex= next((i for i in range(minPDIndex, len(frame_radius)) if frame_radius[i] >= (maxPD * 0.75)),0)
-    _75PerOfMaxPD = str(round(np.abs(_75PerOfMaxPDIndex - minPD) / 30,2)) + "msec"
-    Latency = str(round(np.abs(maxPDIndex - _10PerAftrFlashPt) / 30, 4)) + "msec"
+    maxPD = max(frame_diameter[0:flashPoint])
+    minPD = min(frame_diameter[flashPoint:])
+    maxPDIndex = frame_diameter.index(maxPD)
+    minPDIndex = frame_diameter.index(minPD)
+    _10PerAftrFlashPt = next((i for i in range(maxPDIndex, len(frame_diameter)) if frame_diameter[i] <= (maxPD * 0.90)),0)
+    #####################
+    max_constiction =  np.abs((maxPD - minPD))
+    max_constriction_time = np.abs((frame_diameter.index(maxPD) - frame_diameter.index(minPD))) / fps 
+    mcv = round(max_constiction / max_constriction_time,2)
+    #####################
+    _75PerOfMaxPDIndex= next((i for i in range(minPDIndex, len(frame_diameter)) if frame_diameter[i] >= (maxPD * 0.75)),0)
+    _75PerOfMaxPD = str(round(np.abs(_75PerOfMaxPDIndex - minPD) / 30,2)) 
+    Latency = str(round(np.abs(maxPDIndex - _10PerAftrFlashPt) / 30, 4))
     return [maxPD, minPD, mcv, _75PerOfMaxPD, Latency]
 
-def plot_radius_over_time(frame_radius, plrMetrics, fps):
+def plot_diameter_over_time(frame_diameter, plrMetrics, fps):
     maxPD, minPD, mcv, _75PerOfMaxPD, Latency = plrMetrics
-    # Remove outliers from the frame_radius array
-    filtered_radius = remove_outliers(frame_radius)
+    # Remove outliers from the frame_diameter array
+    filtered_diameter = remove_outliers(frame_diameter)
 
-    # Apply lowpass filter to the cleaned radius data
-    lowpass_filtered_radius = apply_lowpass_filter(filtered_radius, cutoff = 2 , fs=fps)
+    # Apply lowpass filter to the cleaned diameter data
+    lowpass_filtered_diameter = apply_lowpass_filter(filtered_diameter, cutoff = 2 , fs=fps)
 
-    time_values = [i / fps for i in range(len(lowpass_filtered_radius))]
-    tck = interpolate.splrep(time_values, lowpass_filtered_radius, s = 1 )
-    smoothed_radius_spline = interpolate.splev(time_values, tck)
+    time_values = [i / fps for i in range(len(lowpass_filtered_diameter))]
+    tck = interpolate.splrep(time_values, lowpass_filtered_diameter, s = 1 )
+    smoothed_diameter_spline = interpolate.splev(time_values, tck)
 
     # Plotting the smoothed spline result without markers
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -216,20 +220,20 @@ def plot_radius_over_time(frame_radius, plrMetrics, fps):
     # Move the plot to the left, leaving space for the box on the right
     plt.subplots_adjust(left=0.1, right=0.75)  
     
-    ax.plot(time_values, smoothed_radius_spline, linestyle='-', color='b', label='PLR')
+    ax.plot(time_values, smoothed_diameter_spline, linestyle='-', color='b', label='PLR')
 
     ax.set_xlabel('Time (seconds)')
-    ax.set_ylabel('Radius')
-    ax.set_title('Radius Over Time')
+    ax.set_ylabel('diameter')
+    ax.set_title('diameter Over Time')
     ax.grid(True)
     ax.legend()
 
     # Create a box on the right side of the plot with the PLR metrics
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-    metrics_text = f"maxPD: {maxPD}\nminPD: {minPD}\nMCV: {mcv:.3f}\n75% of maxPD: {_75PerOfMaxPD}\nLatency: {Latency}"
+    metrics_text = f"maxPD: {maxPD}mm\nminPD: {minPD}mm\nMCV: {mcv:.3f}mm/s\n75% of maxPD: {_75PerOfMaxPD}s\nLatency: {Latency}s"
 
     # Add text box on the right side of the plot, moving it further to the right
-    fig.text(0.8, 0.5, metrics_text, fontsize=10, bbox=props)  
+    fig.text(0.8, 0.5, metrics_text, fontsize=12, bbox=props)  
 
     # save to temp output_graph_path
     with NamedTemporaryFile(delete=False, suffix=".jpg") as temp_graph_file:
@@ -311,7 +315,7 @@ def processVideoForVOMS(video_file):
 
                 if results.multi_face_landmarks:
                     for face_landmarks in results.multi_face_landmarks:
-                        # Calculate left iris center and radius
+                        # Calculate left iris center and diameter
                         left_iris_left = face_landmarks.landmark[extreme_points["Left Iris Left Extreme"]]
                         left_iris_right = face_landmarks.landmark[extreme_points["Left Iris Right Extreme"]]
                         l_cx = (left_iris_left.x + left_iris_right.x) / 2

@@ -59,7 +59,7 @@ class ModelEvaluator:
         return (0, 0), 0  # Return default values if no contours found
 
     # Overlay the mask and circle on the original image
-    def overlay_mask_on_image(self, image: np.ndarray) -> np.ndarray:
+    def overlay_mask_on_image(self, image: np.ndarray) -> Tuple[np.ndarray, float]:
         # Check brightness of the image
         brightness = self.calculate_brightness(image)
 
@@ -79,26 +79,28 @@ class ModelEvaluator:
         mask = self.postprocess_mask(output.logits)
         
         # Fit the circle to the mask
-        center, radius = self.fit_circle_to_mask(mask)
+        center, pixel_radius = self.fit_circle_to_mask(mask)
+        pixel_diameter = pixel_radius * 2
 
         # TODO: Convert Radius from pixels to mm
-        mm_radius = self.get_mm_radius(image, radius)
-        print(f"Radius: {radius} pixels, {mm_radius} mm")
+        mm_diameter = self.get_mm_diameter(image, pixel_diameter)
+        print(f"Diameter: {pixel_diameter} pixels, {mm_diameter} mm")
 
         # Draw the circle onto the blended image
         if center != (0, 0):
-            cv2.circle(image, center, radius, (0, 255, 0), 2)  # Green circle
-            cv2.putText(image, str(mm_radius*2), 
-                        org = (center[0] + radius + 1, center[1] + radius + 1), 
+            cv2.circle(image, center, pixel_radius, (0, 255, 0), 2)  # Green circle
+            cv2.putText(image, str(mm_diameter*2), 
+                        org = (center[0] + pixel_radius + 1, center[1] + pixel_radius + 1), 
                         fontFace=cv2.FONT_HERSHEY_SIMPLEX,
                         fontScale = 1, 
                         color = (255, 255, 0), 
                         thickness = 2)
         
-        return image, mm_radius
+        return image, mm_diameter
 
     # Function to return the final predicted image with mask and circle
-    def get_predicted_output(self, image: np.ndarray) -> np.ndarray:
+    # TODO: refactor or remove this function and just call overlay_mask_on_image 
+    def get_predicted_output(self, image: np.ndarray) -> Tuple[np.ndarray, float]:
         return self.overlay_mask_on_image(image)
     
     # Add a function to calculate the brightness of the image
@@ -107,7 +109,7 @@ class ModelEvaluator:
         return np.mean(grayscale_image)  # Return the average pixel value
 
     # Add a function to convert the radius from pixels to mm
-    def get_mm_radius(self, image: np.ndarray, radius: int) -> float:
+    def get_mm_diameter(self, image: np.ndarray, pixel_diameter: int) -> float:
         detected_width = self.roboflowService.process_image(image)
         print("detected_width: ", detected_width)
 
@@ -123,8 +125,8 @@ class ModelEvaluator:
         scale_factor = self.IRIS_MM / detected_width
 
         # convert the radius from pixels to mm
-        mm_radius = radius * scale_factor
-        return round(mm_radius, 2)
+        mm_diameter = pixel_diameter * scale_factor
+        return round(mm_diameter, 2)
 
 
         
