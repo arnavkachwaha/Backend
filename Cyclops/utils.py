@@ -59,22 +59,21 @@ def processVideoForPLR(video_file):
             ret, frame = cap.read()
             if ret:
                 try: 
-                    mm_diameter, pupil_circle, iris_circle = model_evaluator.get_pupil_diameter(frame)
+                    predicted_frame, diameter = model_evaluator.get_predicted_output(frame)
                     
-
-                    # if diameter != 0:
-                    #     frame_diameter.append(diameter)
-                    #     with NamedTemporaryFile(delete=False, suffix=".jpg") as temp_frame:
-                    #         cv2.imwrite(temp_frame.name, predicted_frame)
-                    #         frame_filenames.append(temp_frame.name)
-                    # elif diameter == 0 and frame_diameter:
-                    #     frame_diameter.append(frame_diameter[-1])
-                    #     # Copy the last saved frame to the new temporary file
-                    #     last_frame_path = frame_filenames[-1]
-                    #     with NamedTemporaryFile(delete=False, suffix=".jpg") as temp_frame:
-                    #         shutil.copy(last_frame_path, temp_frame.name)
-                    #         frame_filenames.append(temp_frame.name)
-                    # frame_save_count += 1
+                    if diameter != 0:
+                        frame_diameter.append(diameter)
+                        with NamedTemporaryFile(delete=False, suffix=".jpg") as temp_frame:
+                            cv2.imwrite(temp_frame.name, predicted_frame)
+                            frame_filenames.append(temp_frame.name)
+                    elif diameter == 0 and frame_diameter:
+                        frame_diameter.append(frame_diameter[-1])
+                        # Copy the last saved frame to the new temporary file
+                        last_frame_path = frame_filenames[-1]
+                        with NamedTemporaryFile(delete=False, suffix=".jpg") as temp_frame:
+                            shutil.copy(last_frame_path, temp_frame.name)
+                            frame_filenames.append(temp_frame.name)
+                    frame_save_count += 1
                 except Exception as e:
                     print(f"Error saving frame: {e}")
             else:
@@ -180,25 +179,42 @@ def cropFrame(frame):
 def getPlrMetrics(frame_diameter, fps):
     print('Calculating PLR metrics')
     flashPoint = 35
+
+    # Min and Max diameter
     maxPD = max(frame_diameter[0:flashPoint])
     minPD = min(frame_diameter[flashPoint:])
-# AttributeError: 'numpy.ndarray' object has no attribute 'index'
     maxPDIndex = frame_diameter.index(maxPD)
     minPDIndex = frame_diameter.index(minPD)
+
+    # Latency 
     _10PerAftrFlashPt = next((i for i in range(maxPDIndex, len(frame_diameter)) if frame_diameter[i] <= (maxPD * 0.90)),0)
-    #####################
-    max_constiction =  np.abs((maxPD - minPD))
-    max_constriction_time = np.abs((frame_diameter.index(maxPD) - frame_diameter.index(minPD))) / fps 
-    mcv = round(max_constiction / max_constriction_time,2)
-    #####################
-    _75PerOfMaxPDIndex= next((i for i in range(minPDIndex, len(frame_diameter)) if frame_diameter[i] >= (maxPD * 0.75)),0)
-    _75PerOfMaxPD = str(round(np.abs(_75PerOfMaxPDIndex - minPD) / 30,2)) 
-    Latency = str(round(np.abs(maxPDIndex - _10PerAftrFlashPt) / 30, 4))
-    return [maxPD, minPD, mcv, _75PerOfMaxPD, Latency]
+    latency = round(np.abs(maxPDIndex - _10PerAftrFlashPt) / 30, 4)
+
+    # Constricton velecity
+    # to find max velocity, we should take from after flashpoint to the minPD (I think) 
+    # justification is that the velocity is slowed down waiting for flash 
+    flash_diameter = frame_diameter[flashPoint]
+    max_constriction = np.round((flash_diameter - minPD), 2)
+    max_constriction_time = np.abs((flashPoint - minPDIndex)) / fps 
+    mcv = round(max_constriction / max_constriction_time, 2)
+
+    # 75% Recovery 
+    _75PerOfMaxPDIndex = next((i for i in range(minPDIndex, len(frame_diameter)) if frame_diameter[i] >= (maxPD * 0.75)),0)
+    _75PerOfMaxPD = np.round(np.abs(_75PerOfMaxPDIndex) / 30,2)
+        
+
+    # dilation velocity (for now, go from min to 75%)
+    max_dilated_diameter = np.max(frame_diameter[minPDIndex:]) 
+    max_dilated_diameter_index = minPDIndex + np.argmax(frame_diameter[minPDIndex:])
+    max_dilation = np.round((max_dilated_diameter - minPD), 2)
+    max_dilation_time = np.abs((max_dilated_diameter_index - minPDIndex)) / fps
+    mdv = round(max_dilated_diameter / max_constriction_time, 2)
+    
+    return [maxPD, minPD, latency, max_constriction, mcv, _75PerOfMaxPD, mdv]
 
 def plot_diameter_over_time(smoothed_diameter_spline, time_values, fps):
   
-    maxPD, minPD, mcv, _75PerOfMaxPD, Latency = getPlrMetrics(smoothed_diameter_spline, fps)
+    maxPD, minPD, latency, max_constriction, mcv, _75PerOfMaxPD, mdv = getPlrMetrics(smoothed_diameter_spline, fps)
 
     # Plotting the smoothed spline result without markers
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -216,7 +232,15 @@ def plot_diameter_over_time(smoothed_diameter_spline, time_values, fps):
 
     # Create a box on the right side of the plot with the PLR metrics
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-    metrics_text = f"maxPD: {maxPD}mm\nminPD: {minPD}mm\nMCV: {mcv:.3f}mm/s\n75% of maxPD: {_75PerOfMaxPD}s\nLatency: {Latency}s"
+    metrics_text = f"""
+    maxPD: {maxPD}mm
+    minPD: {minPD}mm
+    Delta: {max_constriction}mm
+    Latency: {latency}s
+    T75%: {_75PerOfMaxPD}s
+    MCV: {mcv:.3f}mm/s
+    MDV: {mdv:.3f}mm/s
+    """
 
     # Add text box on the right side of the plot, moving it further to the right
     fig.text(0.8, 0.5, metrics_text, fontsize=12, bbox=props)  
@@ -411,15 +435,3 @@ def plot_iris_center_graph(times, left_iris_centers, right_iris_centers):
     
     return ""
  
-    def overlay_mask_on_image(image, pupil_circle, iris_circle):
-     # Draw the circle onto the blended image
-        cv2.circle(image, pupil_center, pupil_pixel_radius, (0, 255, 0), 2)  # Green circle
-        cv2.putText(image, str(mm_diameter), 
-                    org = (pupil_center[0] + pupil_pixel_radius + 1, pupil_center[1] + pupil_pixel_radius + 1), 
-                    fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                    fontScale = 1, 
-                    color = (0, 255, 0), 
-                    thickness = 2)
-
-        # draw iris bounding box
-        cv2.rectangle(image, (int(iris_circle[0][0] - iris_circle[1]), int(iris_circle[0][1] - iris_circle[1])), (int(iris_circle[0][0] + iris_circle[1]), int(iris_circle[0][1] + iris_circle[1])), (255, 255, 255), 1)
