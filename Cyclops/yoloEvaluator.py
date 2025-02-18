@@ -76,7 +76,7 @@ class YOLOEvaluator:
         return class_circles  # Return default values if no contours found
 
     # Overlay the mask and circle on the original image
-    def overlay_mask_on_image(self, image: np.ndarray) -> Tuple[np.ndarray, float]:
+    def get_pupil_diameter(self, image: np.ndarray) -> Tuple[np.ndarray, float]:
         # Check brightness of the image
         brightness = self.calculate_brightness(image)
 
@@ -144,7 +144,6 @@ class YOLOEvaluator:
 
         pupil_pixel_radius = pupil_circle[1]
         pupil_pixel_diameter = pupil_pixel_radius * 2
-        pupil_center = pupil_circle[0]
         iris_diameter = iris_circle[1] * 2
         
         # TODO: Convert Radius from pixels to mm
@@ -154,7 +153,8 @@ class YOLOEvaluator:
         if self.last_pupil_diameter == 0:
             self.last_pupil_diameter = mm_diameter
 
-        if abs(mm_diameter - self.last_pupil_diameter) > 2:
+        # still toying with this threshold
+        if abs(mm_diameter - self.last_pupil_diameter) > 0.5:
             print(f"Frame discarded due to large change in diameter: {mm_diameter}")
             return image, 0
 
@@ -165,35 +165,9 @@ class YOLOEvaluator:
         else:
             # update the last pupil diameter
             self.last_pupil_diameter = mm_diameter
-
-        # Draw the circle onto the blended image
-        cv2.circle(image, pupil_center, pupil_pixel_radius, (0, 255, 0), 2)  # Green circle
-        cv2.putText(image, str(mm_diameter), 
-                    org = (pupil_center[0] + pupil_pixel_radius + 1, pupil_center[1] + pupil_pixel_radius + 1), 
-                    fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                    fontScale = 1, 
-                    color = (0, 255, 0), 
-                    thickness = 2)
-
-        # draw the iris circle
-        # cv2.circle(image, iris_circle[0], iris_circle[1], (255, 0, 0), 2)
-        # cv2.putText(image, "",
-        #             org = (iris_circle[0][0] + iris_circle[1] + 1, iris_circle[0][1] + iris_circle[1] + 1), 
-        #             fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-        #             fontScale = 1, 
-        #             color = (255, 0, 0), 
-        #             thickness = 1)     
-
-        # draw iris bounding box
-        cv2.rectangle(image, (int(iris_circle[0][0] - iris_circle[1]), int(iris_circle[0][1] - iris_circle[1])), (int(iris_circle[0][0] + iris_circle[1]), int(iris_circle[0][1] + iris_circle[1])), (255, 255, 255), 1)
         
-        return image, mm_diameter
+        return mm_diameter, pupil_circle, iris_circle
 
-    # Function to return the final predicted image with mask and circle
-    # TODO: refactor or remove this function and just call overlay_mask_on_image 
-    def get_predicted_output(self, image: np.ndarray) -> Tuple[np.ndarray, float]:
-        return self.overlay_mask_on_image(image)
-    
     # Add a function to calculate the brightness of the image
     def calculate_brightness(self, image: np.ndarray) -> float:
         grayscale_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)

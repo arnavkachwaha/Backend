@@ -58,43 +58,36 @@ def processVideoForPLR(video_file):
         while cap.isOpened():
             ret, frame = cap.read()
             if ret:
-                print(f"Processing frame {all_frames_count} of {total_frames}")
-                all_frames_count += 1
-                # Hard save for local, temp for prod
-                # if diameter != 0:
-                #     frame_diameter.append(diameter)
-                #     cv2.imwrite(full_frame_path, predicted_frame)
-                #     frame_filenames.append(full_frame_path)
-                #     frame_save_count += 1
-                # elif(diameter == 0 and frame_diameter):
-                #     frame_diameter.append(frame_diameter[-1])
-                #     last_frame_filename = f"frame_{frame_save_count - 1}.png"
-                #     last_frame_path = os.path.join(FRAMES_DIR, last_frame_filename)
-                #     shutil.copy(last_frame_path, full_frame_path)
                 try: 
-                    predicted_frame, diameter = model_evaluator.get_predicted_output(frame)
-                    if diameter != 0:
-                        frame_diameter.append(diameter)
-                        with NamedTemporaryFile(delete=False, suffix=".jpg") as temp_frame:
-                            cv2.imwrite(temp_frame.name, predicted_frame)
-                            frame_filenames.append(temp_frame.name)
-                    elif diameter == 0 and frame_diameter:
-                        frame_diameter.append(frame_diameter[-1])
-                        # Copy the last saved frame to the new temporary file
-                        last_frame_path = frame_filenames[-1]
-                        with NamedTemporaryFile(delete=False, suffix=".jpg") as temp_frame:
-                            shutil.copy(last_frame_path, temp_frame.name)
-                            frame_filenames.append(temp_frame.name)
-                    frame_save_count += 1
+                    mm_diameter, pupil_circle, iris_circle = model_evaluator.get_pupil_diameter(frame)
+                    
+
+                    # if diameter != 0:
+                    #     frame_diameter.append(diameter)
+                    #     with NamedTemporaryFile(delete=False, suffix=".jpg") as temp_frame:
+                    #         cv2.imwrite(temp_frame.name, predicted_frame)
+                    #         frame_filenames.append(temp_frame.name)
+                    # elif diameter == 0 and frame_diameter:
+                    #     frame_diameter.append(frame_diameter[-1])
+                    #     # Copy the last saved frame to the new temporary file
+                    #     last_frame_path = frame_filenames[-1]
+                    #     with NamedTemporaryFile(delete=False, suffix=".jpg") as temp_frame:
+                    #         shutil.copy(last_frame_path, temp_frame.name)
+                    #         frame_filenames.append(temp_frame.name)
+                    # frame_save_count += 1
                 except Exception as e:
                     print(f"Error saving frame: {e}")
             else:
                 break
 
         cap.release()
+
+        print('Smoothing diameter data')
+        smoothed_diameter_spline, time_values = get_smoothed_diameter_spline(frame_diameter, fps)
         
         print('Plotting graph')
-        temp_graph_path = plot_diameter_over_time(frame_diameter, getPlrMetrics(frame_diameter, fps), fps)
+        temp_graph_path = plot_diameter_over_time(smoothed_diameter_spline, time_values, fps)
+
         print('Creating video')
         temp_video_path = create_video_from_frames(frame_filenames, fps)
         vid_file, graph_file = save_outputs(temp_video_path, temp_graph_path, "PLR", timestamp)
@@ -189,6 +182,7 @@ def getPlrMetrics(frame_diameter, fps):
     flashPoint = 35
     maxPD = max(frame_diameter[0:flashPoint])
     minPD = min(frame_diameter[flashPoint:])
+# AttributeError: 'numpy.ndarray' object has no attribute 'index'
     maxPDIndex = frame_diameter.index(maxPD)
     minPDIndex = frame_diameter.index(minPD)
     _10PerAftrFlashPt = next((i for i in range(maxPDIndex, len(frame_diameter)) if frame_diameter[i] <= (maxPD * 0.90)),0)
@@ -202,17 +196,9 @@ def getPlrMetrics(frame_diameter, fps):
     Latency = str(round(np.abs(maxPDIndex - _10PerAftrFlashPt) / 30, 4))
     return [maxPD, minPD, mcv, _75PerOfMaxPD, Latency]
 
-def plot_diameter_over_time(frame_diameter, plrMetrics, fps):
-    maxPD, minPD, mcv, _75PerOfMaxPD, Latency = plrMetrics
-    # Remove outliers from the frame_diameter array
-    filtered_diameter = remove_outliers(frame_diameter)
-
-    # Apply lowpass filter to the cleaned diameter data
-    lowpass_filtered_diameter = apply_lowpass_filter(filtered_diameter, cutoff = 2 , fs=fps)
-
-    time_values = [i / fps for i in range(len(lowpass_filtered_diameter))]
-    tck = interpolate.splrep(time_values, lowpass_filtered_diameter, s = 1 )
-    smoothed_diameter_spline = interpolate.splev(time_values, tck)
+def plot_diameter_over_time(smoothed_diameter_spline, time_values, fps):
+  
+    maxPD, minPD, mcv, _75PerOfMaxPD, Latency = getPlrMetrics(smoothed_diameter_spline, fps)
 
     # Plotting the smoothed spline result without markers
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -242,6 +228,22 @@ def plot_diameter_over_time(frame_diameter, plrMetrics, fps):
         return temp_graph_file.name
     
     return ""
+
+def get_smoothed_diameter_spline(frame_diameter, fps):
+    # Remove outliers from the frame_diameter array
+    filtered_diameter = remove_outliers(frame_diameter)
+
+    # Apply lowpass filter to the cleaned diameter data
+    lowpass_filtered_diameter = apply_lowpass_filter(filtered_diameter, cutoff = 2 , fs=fps)
+
+    time_values = [i / fps for i in range(len(lowpass_filtered_diameter))]
+    tck = interpolate.splrep(time_values, lowpass_filtered_diameter, s = 1 )
+    smoothed_diameter_spline = interpolate.splev(time_values, tck)   
+
+    # round to 2 decimal places
+    smoothed_diameter_spline = np.round(smoothed_diameter_spline, 2) 
+
+    return smoothed_diameter_spline.tolist(), time_values
 
 def remove_outliers(data, threshold=2.5):
     z_scores = zscore(data)
@@ -409,3 +411,15 @@ def plot_iris_center_graph(times, left_iris_centers, right_iris_centers):
     
     return ""
  
+    def overlay_mask_on_image(image, pupil_circle, iris_circle):
+     # Draw the circle onto the blended image
+        cv2.circle(image, pupil_center, pupil_pixel_radius, (0, 255, 0), 2)  # Green circle
+        cv2.putText(image, str(mm_diameter), 
+                    org = (pupil_center[0] + pupil_pixel_radius + 1, pupil_center[1] + pupil_pixel_radius + 1), 
+                    fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                    fontScale = 1, 
+                    color = (0, 255, 0), 
+                    thickness = 2)
+
+        # draw iris bounding box
+        cv2.rectangle(image, (int(iris_circle[0][0] - iris_circle[1]), int(iris_circle[0][1] - iris_circle[1])), (int(iris_circle[0][0] + iris_circle[1]), int(iris_circle[0][1] + iris_circle[1])), (255, 255, 255), 1)
