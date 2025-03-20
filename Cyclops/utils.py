@@ -58,21 +58,9 @@ def processVideoForPLR(video_file):
         while cap.isOpened():
             ret, frame = cap.read()
             if ret:
-                print(f"Processing frame {all_frames_count} of {total_frames}")
-                all_frames_count += 1
-                # Hard save for local, temp for prod
-                # if diameter != 0:
-                #     frame_diameter.append(diameter)
-                #     cv2.imwrite(full_frame_path, predicted_frame)
-                #     frame_filenames.append(full_frame_path)
-                #     frame_save_count += 1
-                # elif(diameter == 0 and frame_diameter):
-                #     frame_diameter.append(frame_diameter[-1])
-                #     last_frame_filename = f"frame_{frame_save_count - 1}.png"
-                #     last_frame_path = os.path.join(FRAMES_DIR, last_frame_filename)
-                #     shutil.copy(last_frame_path, full_frame_path)
                 try: 
                     predicted_frame, diameter = model_evaluator.get_predicted_output(frame)
+                    
                     if diameter != 0:
                         frame_diameter.append(diameter)
                         with NamedTemporaryFile(delete=False, suffix=".jpg") as temp_frame:
@@ -92,9 +80,13 @@ def processVideoForPLR(video_file):
                 break
 
         cap.release()
+
+        print('Smoothing diameter data')
+        smoothed_diameter_spline, time_values = get_smoothed_diameter_spline(frame_diameter, fps)
         
         print('Plotting graph')
-        temp_graph_path = plot_diameter_over_time(frame_diameter, getPlrMetrics(frame_diameter, fps), fps)
+        temp_graph_path = plot_diameter_over_time(smoothed_diameter_spline, time_values, fps)
+
         print('Creating video')
         temp_video_path = create_video_from_frames(frame_filenames, fps)
         vid_file, graph_file = save_outputs(temp_video_path, temp_graph_path, "PLR", timestamp)
@@ -187,32 +179,42 @@ def cropFrame(frame):
 def getPlrMetrics(frame_diameter, fps):
     print('Calculating PLR metrics')
     flashPoint = 35
+
+    # Min and Max diameter
     maxPD = max(frame_diameter[0:flashPoint])
     minPD = min(frame_diameter[flashPoint:])
     maxPDIndex = frame_diameter.index(maxPD)
     minPDIndex = frame_diameter.index(minPD)
+
+    # Latency 
     _10PerAftrFlashPt = next((i for i in range(maxPDIndex, len(frame_diameter)) if frame_diameter[i] <= (maxPD * 0.90)),0)
-    #####################
-    max_constiction =  np.abs((maxPD - minPD))
-    max_constriction_time = np.abs((frame_diameter.index(maxPD) - frame_diameter.index(minPD))) / fps 
-    mcv = round(max_constiction / max_constriction_time,2)
-    #####################
-    _75PerOfMaxPDIndex= next((i for i in range(minPDIndex, len(frame_diameter)) if frame_diameter[i] >= (maxPD * 0.75)),0)
-    _75PerOfMaxPD = str(round(np.abs(_75PerOfMaxPDIndex - minPD) / 30,2)) 
-    Latency = str(round(np.abs(maxPDIndex - _10PerAftrFlashPt) / 30, 4))
-    return [maxPD, minPD, mcv, _75PerOfMaxPD, Latency]
+    latency = round(np.abs(maxPDIndex - _10PerAftrFlashPt) / 30, 4)
 
-def plot_diameter_over_time(frame_diameter, plrMetrics, fps):
-    maxPD, minPD, mcv, _75PerOfMaxPD, Latency = plrMetrics
-    # Remove outliers from the frame_diameter array
-    filtered_diameter = remove_outliers(frame_diameter)
+    # Constricton velecity
+    # to find max velocity, we should take from after flashpoint to the minPD (I think) 
+    # justification is that the velocity is slowed down waiting for flash 
+    flash_diameter = frame_diameter[flashPoint]
+    max_constriction = np.round((flash_diameter - minPD), 2)
+    max_constriction_time = np.abs((flashPoint - minPDIndex)) / fps 
+    mcv = round(max_constriction / max_constriction_time, 2)
 
-    # Apply lowpass filter to the cleaned diameter data
-    lowpass_filtered_diameter = apply_lowpass_filter(filtered_diameter, cutoff = 2 , fs=fps)
+    # 75% Recovery 
+    _75PerOfMaxPDIndex = next((i for i in range(minPDIndex, len(frame_diameter)) if frame_diameter[i] >= (maxPD * 0.75)),0)
+    _75PerOfMaxPD = np.round(np.abs(_75PerOfMaxPDIndex) / 30,2)
+        
 
-    time_values = [i / fps for i in range(len(lowpass_filtered_diameter))]
-    tck = interpolate.splrep(time_values, lowpass_filtered_diameter, s = 1 )
-    smoothed_diameter_spline = interpolate.splev(time_values, tck)
+    # dilation velocity (for now, go from min to 75%)
+    max_dilated_diameter = np.max(frame_diameter[minPDIndex:]) 
+    max_dilated_diameter_index = minPDIndex + np.argmax(frame_diameter[minPDIndex:])
+    max_dilation = np.round((max_dilated_diameter - minPD), 2)
+    max_dilation_time = np.abs((max_dilated_diameter_index - minPDIndex)) / fps
+    mdv = round(max_dilated_diameter / max_constriction_time, 2)
+    
+    return [maxPD, minPD, latency, max_constriction, mcv, _75PerOfMaxPD, mdv]
+
+def plot_diameter_over_time(smoothed_diameter_spline, time_values, fps):
+  
+    maxPD, minPD, latency, max_constriction, mcv, _75PerOfMaxPD, mdv = getPlrMetrics(smoothed_diameter_spline, fps)
 
     # Plotting the smoothed spline result without markers
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -230,7 +232,15 @@ def plot_diameter_over_time(frame_diameter, plrMetrics, fps):
 
     # Create a box on the right side of the plot with the PLR metrics
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-    metrics_text = f"maxPD: {maxPD}mm\nminPD: {minPD}mm\nMCV: {mcv:.3f}mm/s\n75% of maxPD: {_75PerOfMaxPD}s\nLatency: {Latency}s"
+    metrics_text = f"""
+    maxPD: {maxPD}mm
+    minPD: {minPD}mm
+    Delta: {max_constriction}mm
+    Latency: {latency}s
+    T75%: {_75PerOfMaxPD}s
+    MCV: {mcv:.3f}mm/s
+    MDV: {mdv:.3f}mm/s
+    """
 
     # Add text box on the right side of the plot, moving it further to the right
     fig.text(0.8, 0.5, metrics_text, fontsize=12, bbox=props)  
@@ -242,6 +252,22 @@ def plot_diameter_over_time(frame_diameter, plrMetrics, fps):
         return temp_graph_file.name
     
     return ""
+
+def get_smoothed_diameter_spline(frame_diameter, fps):
+    # Remove outliers from the frame_diameter array
+    filtered_diameter = remove_outliers(frame_diameter)
+
+    # Apply lowpass filter to the cleaned diameter data
+    lowpass_filtered_diameter = apply_lowpass_filter(filtered_diameter, cutoff = 2 , fs=fps)
+
+    time_values = [i / fps for i in range(len(lowpass_filtered_diameter))]
+    tck = interpolate.splrep(time_values, lowpass_filtered_diameter, s = 1 )
+    smoothed_diameter_spline = interpolate.splev(time_values, tck)   
+
+    # round to 2 decimal places
+    smoothed_diameter_spline = np.round(smoothed_diameter_spline, 2) 
+
+    return smoothed_diameter_spline.tolist(), time_values
 
 def remove_outliers(data, threshold=2.5):
     z_scores = zscore(data)
