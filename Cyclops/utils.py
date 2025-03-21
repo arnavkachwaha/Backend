@@ -13,6 +13,7 @@ from .yoloEvaluator import YOLOEvaluator
 from moviepy.editor import ImageSequenceClip
 import datetime
 from scipy.signal import butter, filtfilt, detrend
+from .models import PLRResult
 
 mp_face_mesh = mp.solutions.face_mesh
 matplotlib.use('Agg')
@@ -84,12 +85,37 @@ def processVideoForPLR(video_file):
         print('Smoothing diameter data')
         smoothed_diameter_spline, time_values = get_smoothed_diameter_spline(frame_diameter, fps)
         
+        print('Calculating PLR metrics')
+        plr_metrics = getPlrMetrics(frame_diameter, fps)
+
         print('Plotting graph')
-        temp_graph_path = plot_diameter_over_time(smoothed_diameter_spline, time_values, fps)
+        temp_graph_path = plot_diameter_over_time(smoothed_diameter_spline, time_values, plr_metrics)
 
         print('Creating video')
         temp_video_path = create_video_from_frames(frame_filenames, fps)
         vid_file, graph_file = save_outputs(temp_video_path, temp_graph_path, "PLR", timestamp)
+
+        # save to sqlite 
+        maxPD, minPD, latency, max_constriction, acv, _75PerOfMaxPD, adv = plr_metrics
+        plr_result = PLRResult.objects.create(
+            video_file=vid_file,
+            graph_file=graph_file,
+            frame_diameter=frame_diameter,
+            smoothed_diameter_spline=smoothed_diameter_spline,
+            maxPD=maxPD,
+            minPD=minPD,
+            latency=latency,
+            max_constriction=max_constriction,
+            acv=acv,
+            _75PerOfMaxPD=_75PerOfMaxPD,
+            adv=adv,
+        )
+
+        print(f"PLRResult saved with ID: {plr_result.id}")
+
+        # verify write was successful
+        exists = PLRResult.objects.filter(id=plr_result.id).exists()
+        print("Write success!" if exists else "Write failed.")
 
         return {"message": "Frames captured successfully", "video": vid_file, "graph": graph_file}
     
@@ -186,35 +212,31 @@ def getPlrMetrics(frame_diameter, fps):
     maxPDIndex = frame_diameter.index(maxPD)
     minPDIndex = frame_diameter.index(minPD)
 
-    # Latency 
-    _10PerAftrFlashPt = next((i for i in range(maxPDIndex, len(frame_diameter)) if frame_diameter[i] <= (maxPD * 0.90)),0)
+    # Latency - set to 1.0
+    _10PerAftrFlashPt = next((i for i in range(maxPDIndex, len(frame_diameter)) if frame_diameter[i] <= (maxPD * 0.95)),0)
     latency = round(np.abs(maxPDIndex - _10PerAftrFlashPt) / 30, 4)
 
     # Constricton velecity
-    # to find max velocity, we should take from after flashpoint to the minPD (I think) 
-    # justification is that the velocity is slowed down waiting for flash 
-    flash_diameter = frame_diameter[flashPoint]
-    max_constriction = np.round((flash_diameter - minPD), 2)
-    max_constriction_time = np.abs((flashPoint - minPDIndex)) / fps 
-    mcv = round(max_constriction / max_constriction_time, 2)
+    max_constriction = np.round((maxPD - minPD), 2)
+    max_constriction_time = np.abs((maxPDIndex - minPDIndex)) / fps 
+    acv = round(max_constriction / max_constriction_time, 2)
 
     # 75% Recovery 
     _75PerOfMaxPDIndex = next((i for i in range(minPDIndex, len(frame_diameter)) if frame_diameter[i] >= (maxPD * 0.75)),0)
     _75PerOfMaxPD = np.round(np.abs(_75PerOfMaxPDIndex) / 30,2)
         
-
     # dilation velocity (for now, go from min to 75%)
     max_dilated_diameter = np.max(frame_diameter[minPDIndex:]) 
     max_dilated_diameter_index = minPDIndex + np.argmax(frame_diameter[minPDIndex:])
     max_dilation = np.round((max_dilated_diameter - minPD), 2)
     max_dilation_time = np.abs((max_dilated_diameter_index - minPDIndex)) / fps
-    mdv = round(max_dilated_diameter / max_constriction_time, 2)
+    adv = round(max_dilated_diameter / max_constriction_time, 2)
     
-    return [maxPD, minPD, latency, max_constriction, mcv, _75PerOfMaxPD, mdv]
+    return [maxPD, minPD, latency, max_constriction, acv, _75PerOfMaxPD, adv]
 
-def plot_diameter_over_time(smoothed_diameter_spline, time_values, fps):
+def plot_diameter_over_time(smoothed_diameter_spline, time_values, plr_metrics):
   
-    maxPD, minPD, latency, max_constriction, mcv, _75PerOfMaxPD, mdv = getPlrMetrics(smoothed_diameter_spline, fps)
+    maxPD, minPD, latency, max_constriction, acv, _75PerOfMaxPD, adv = plr_metrics
 
     # Plotting the smoothed spline result without markers
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -238,8 +260,8 @@ def plot_diameter_over_time(smoothed_diameter_spline, time_values, fps):
     Delta: {max_constriction}mm
     Latency: {latency}s
     T75%: {_75PerOfMaxPD}s
-    MCV: {mcv:.3f}mm/s
-    MDV: {mdv:.3f}mm/s
+    ACV: {acv:.3f}mm/s
+    ADV: {adv:.3f}mm/s
     """
 
     # Add text box on the right side of the plot, moving it further to the right
