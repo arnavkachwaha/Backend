@@ -1,7 +1,9 @@
+import json
 import os
 from django.conf import settings
 from django.shortcuts import render
 from Cyclops.forms import VideoForm
+from Cyclops.models import TestResult
 from Cyclops.utils import processVideoForPLR , processVideoForVOMS
 from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -64,5 +66,71 @@ def fetch_processed_video(request):
                 return response
         else:
             return JsonResponse({'message': 'Processed video not found'}, status=404)
+    
+    return JsonResponse({'message': 'Invalid request method'}, status=405)
+
+@csrf_exempt
+def upload_test_data(request):
+    if request.method == 'POST':
+        video_file = request.FILES.get('videofile')
+        test_type = request.POST.get('testType')
+        plot_data_str = request.POST.get('plotData')
+        fps_str = request.POST.get('fps', '30')
+        maxPD_str = request.POST.get('maxPD', '')
+        minPD_str = request.POST.get('minPD', '')
+        latency = request.POST.get('latency', '')
+        max_constriction_str = request.POST.get('maxConstriction', '')
+        seventyFivePercentRecovery = request.POST.get('seventyFivePercentRecovery', '')
+        adv_str = request.POST.get('adv', '')
+        acv_str = request.POST.get('acv', '')
+        
+        try:
+            plot_data = json.loads(plot_data_str) if plot_data_str else []
+        except Exception as e:
+            return JsonResponse({'message': f'Invalid plotData format: {e}'}, status=400)
+        
+        if not video_file or not test_type:
+            return JsonResponse({'message': 'Missing required fields: videofile and testType'}, status=400)
+        
+        try:
+            fps = float(fps_str)
+        except ValueError:
+            fps = 30.0
+        
+        def parse_float(val):
+            try:
+                return float(val) if val != "" else None
+            except ValueError:
+                return None
+        
+        maxPD = parse_float(maxPD_str)
+        minPD = parse_float(minPD_str)
+        max_constriction = parse_float(max_constriction_str)
+        adv = parse_float(adv_str)
+        acv = parse_float(acv_str)
+        
+        try:
+            test_instance = TestResult.objects.create(
+                video_file=video_file,
+                test_type=test_type,
+                plotData=plot_data,
+                fps=fps,
+                maxPD=maxPD,
+                minPD=minPD,
+                latency=latency,
+                max_constriction=max_constriction,
+                seventyFivePercentRecovery=seventyFivePercentRecovery,
+                adv=adv,
+                acv=acv
+            )
+            return JsonResponse({
+                'message': 'Test data saved successfully',
+                'id': str(test_instance.id)
+            }, status=200)
+        except Exception as e:
+            return JsonResponse({'message': str(e)}, status=500)
+        
+    elif request.method == 'GET':
+        return HttpResponse("Upload test data", status=200)
     
     return JsonResponse({'message': 'Invalid request method'}, status=405)
