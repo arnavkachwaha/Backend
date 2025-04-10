@@ -47,6 +47,8 @@ class TestResult(models.Model):
     seventyFivePercentRecovery = models.CharField(max_length=10, null=True, blank=True)
     adv = models.FloatField(null=True, blank=True)
     acv = models.FloatField(null=True, blank=True)
+    iris_bounding_boxes = models.JSONField(null=True, blank=True)
+    pupil_bounding_boxes = models.JSONField(null=True, blank=True)
     
     def __str__(self):
         return f"TestResult - {self.id} - {self.timestamp}"

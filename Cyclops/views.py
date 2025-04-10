@@ -83,11 +83,23 @@ def upload_test_data(request):
         seventyFivePercentRecovery = request.POST.get('seventyFivePercentRecovery', '')
         adv_str = request.POST.get('adv', '')
         acv_str = request.POST.get('acv', '')
+        iris_bounding_boxes_str = request.POST.get('irisBoundingBoxes', '')
+        pupil_bounding_boxes_str = request.POST.get('pupilBoundingBoxes', '')
         
         try:
             plot_data = json.loads(plot_data_str) if plot_data_str else []
         except Exception as e:
             return JsonResponse({'message': f'Invalid plotData format: {e}'}, status=400)
+        
+        try:
+            iris_bounding_boxes = json.loads(iris_bounding_boxes_str) if iris_bounding_boxes_str else []
+        except Exception as e:
+            return JsonResponse({'message': f'Invalid irisData format: {e}'}, status=400)
+        
+        try:
+            pupil_bounding_boxes = json.loads(pupil_bounding_boxes_str) if pupil_bounding_boxes_str else []
+        except Exception as e:
+            return JsonResponse({'message': f'Invalid pupilData format: {e}'}, status=400)
         
         if not video_file or not test_type:
             return JsonResponse({'message': 'Missing required fields: videofile and testType'}, status=400)
@@ -121,7 +133,9 @@ def upload_test_data(request):
                 max_constriction=max_constriction,
                 seventyFivePercentRecovery=seventyFivePercentRecovery,
                 adv=adv,
-                acv=acv
+                acv=acv,
+                iris_bounding_boxes=iris_bounding_boxes,
+                pupil_bounding_boxes=pupil_bounding_boxes
             )
             return JsonResponse({
                 'message': 'Test data saved successfully',
