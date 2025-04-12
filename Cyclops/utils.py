@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from django.conf import settings
 from tempfile import NamedTemporaryFile
 from .yoloEvaluator import YOLOEvaluator
-from moviepy.editor import ImageSequenceClip
+from moviepy import ImageSequenceClip
 import datetime
 from scipy.signal import butter, filtfilt, detrend
 from .models import PLRResult
