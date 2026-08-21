@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 from django.conf import settings
 from django.shortcuts import render
 from Cyclops.forms import VideoForm
@@ -7,6 +8,16 @@ from Cyclops.models import TestResult
 from Cyclops.utils import processVideoForPLR , processVideoForVOMS
 from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
+
+def delayed_cleanup(file_paths):
+    """Background task to delete files from the disk after a delay."""
+    for path in file_paths:
+        if path and os.path.exists(path):
+            try:
+                os.remove(path)
+                print(f"Successfully cleaned up space: {path}")
+            except Exception as e:
+                print(f"Cleanup error: {e}")
 
 @csrf_exempt
 def health(request):
@@ -17,6 +28,7 @@ def upload_form(request):
     if request.method == 'POST':
         videoType = request.POST.get('videoType')
         form = VideoForm(request.POST, request.FILES)
+        
         if form.is_valid():
             videoFile = request.FILES['videofile']
             try:
@@ -26,18 +38,26 @@ def upload_form(request):
                 else:
                     print("Processing video for PLR")
                     result = processVideoForPLR(videoFile)
+                    
                 if 'error' in result:
                     return JsonResponse({'message': result['error']}, status=500)
+                
                 video_path = result.get('video')
                 graph_path = result.get('graph')
+                metrics = result.get('metrics')
 
                 if video_path and os.path.exists(video_path) and graph_path and os.path.exists(graph_path):
                     video_download_url = request.build_absolute_uri(f'/media/{videoType}/outputs/videos/{os.path.basename(video_path)}')
                     graph_download_url = request.build_absolute_uri(f'/media/{videoType}/outputs/graphs/{os.path.basename(graph_path)}')
 
+                    # Trigger a background thread to delete the outputs in 60 seconds
+                    # This allows the frontend enough time to hit the download URLs
+                    threading.Timer(60.0, delayed_cleanup, args=([video_path, graph_path],)).start()
+
                     return JsonResponse({
                         'video_download_url': video_download_url,
-                        'graph_download_url': graph_download_url
+                        'graph_download_url': graph_download_url,
+                        'metrics': metrics
                     }, status=200)
 
             except Exception as e:
@@ -71,6 +91,7 @@ def fetch_processed_video(request):
 
 @csrf_exempt
 def upload_test_data(request):
+    # Keep exactly as you have it
     if request.method == 'POST':
         video_file = request.FILES.get('videofile')
         test_type = request.POST.get('testType')
