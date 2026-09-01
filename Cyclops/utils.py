@@ -204,7 +204,9 @@ def getPlrMetrics(frame_diameter, fps):
     if not frame_diameter or fps <= 0:
         return [0, 0, 0, 0, 0, 0, 0]
 
-    flashPoint = 35 
+    # Calculate the flash frame dynamically based on a 1.0 second delay and the video FPS
+    flashPoint = int(fps * 1.0)
+    
     if len(frame_diameter) <= flashPoint:
         flashPoint = 0
 
@@ -217,24 +219,33 @@ def getPlrMetrics(frame_diameter, fps):
     minPD = min(post_flash_slice)
     minPDIndex = flashPoint + post_flash_slice.index(minPD)
 
+    # 1. FIX LATENCY: Find exactly when it drops below 95% after the flash.
     constriction_target = maxPD * 0.95
-    constriction_onset_index = next(
-        (i for i in range(flashPoint, len(frame_diameter)) if frame_diameter[i] <= constriction_target),
-        maxPDIndex
-    )
-    latency = round(max(0, (constriction_onset_index - flashPoint)) / fps, 4)
+    try:
+        constriction_onset_index = next(
+            i for i in range(flashPoint, len(frame_diameter)) if frame_diameter[i] <= constriction_target
+        )
+        latency = round(max(0, (constriction_onset_index - flashPoint)) / fps, 4)
+    except StopIteration:
+        constriction_onset_index = maxPDIndex # Fallback for ACV math
+        latency = -1.0 # -1.0 means it failed to detect the drop
 
+    # 2. FIX ACV: (End Size - Start Size) / Constriction Time (Results in a negative value)
     max_constriction = np.round((maxPD - minPD), 2)
-    max_constriction_time = max(1 / fps, abs(minPDIndex - maxPDIndex) / fps)
-    acv = round(max_constriction / max_constriction_time, 2)
+    constriction_time = max(1 / fps, abs(minPDIndex - constriction_onset_index) / fps)
+    acv = round((minPD - maxPD) / constriction_time, 2)
 
+    # 3. FIX T75: Find when it recovers 75% of the constricted amount.
     target_75_recovery = minPD + (0.75 * (maxPD - minPD))
-    _75PerIndex = next(
-        (i for i in range(minPDIndex, len(frame_diameter)) if frame_diameter[i] >= target_75_recovery),
-        minPDIndex
-    )
-    _75PerOfMaxPD = np.round(max(0, (_75PerIndex - minPDIndex)) / fps, 2)
+    try:
+        _75PerIndex = next(
+            i for i in range(minPDIndex, len(frame_diameter)) if frame_diameter[i] >= target_75_recovery
+        )
+        _75PerOfMaxPD = np.round(max(0, (_75PerIndex - minPDIndex)) / fps, 2)
+    except StopIteration:
+        _75PerOfMaxPD = -1.0 # -1.0 means the video ended before recovery
 
+    # ADV
     post_min_slice = frame_diameter[minPDIndex:]
     if len(post_min_slice) > 0:
         max_dilated_diameter = max(post_min_slice)
